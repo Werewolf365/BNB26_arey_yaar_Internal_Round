@@ -19,6 +19,7 @@
 - **Backend API** (`apps/api`): all `docs/api.md` route groups on Postgres
   (migrations, FK/uniques, idempotency keys, concurrent-duplicate convergence,
   typed errors incl. a suffix-rule fix found by tests) + live release→VERIFIED→audit-ok loop.
+- **CORS default origins for dev API**: when `QUORUM_CORS_ORIGINS` is not set the API now defaults to `http://localhost:3000` and `http://127.0.0.1:3000`, allowing the Next.js front‑end to fetch `/api/v1/*` without extra configuration.
 - **Audit**: hash chain identical across CLI/API/Node; tamper pinpoints the record.
 - **Blockchain**: `QuorumAnchor.sol` (5/5 forge tests), Dockerized Foundry,
   live Anvil deploys + anchors + event re-verification (txs recorded in `docs/blockchain.md`).
@@ -76,7 +77,7 @@
 node scripts/doctor.js
 npm test                                   # 21/21
 node scripts/slice1-demo.mjs               # 3/3 scenarios
-go test ./...                              # all pkgs ok
+go test ./...                              # all pkgs ok (incl. CORS change)
 go build -o quorum.exe ./apps/cli; .\quorum.exe verify --repo https://github.com/example/tiny --commit abc123 --fixture-tiny
 QUORUM_TEST_POSTGRES=1 go test -run TestPostgresIntegration ./apps/api/...
 QUORUM_LIVE_ANVIL=1 go test -run TestAnchorLive ./internal/runner/
@@ -84,12 +85,15 @@ QUORUM_LIVE_ANVIL=1 go test -run TestAnchorLive ./internal/runner/
 
 ## Handoff / stop point (2026-10-03)
 
-Last stable: `ead8dca` (green build/tests). Uncommitted leftovers are
+Last stable: `ead8dca` (green build/tests). The repo now includes the
+CORS‑default change (`apps/api/main.go`) and the accompanying store
+adjustments (`memory.go`, `postgres.go`). Uncommitted leftovers are
 documented field-by-field in `docs/HANDOFF.md`: Sigstore package +
 `attest` CLI complete with tests; storage backend complete with tests;
-API storage wiring intentionally left half-edited (only breakage, by design
-of the pause). Every new capability above has focused tests; the
-half-implemented server wiring is exactly where work resumes.
+the API now has default `QUORUM_CORS_ORIGINS` for dev, enabling the
+Next.js front‑end to reach `/api/v1/*` from `http://localhost:3000`.
+Every new capability above has focused tests; work may continue from
+this point.
 
 ## Map
 

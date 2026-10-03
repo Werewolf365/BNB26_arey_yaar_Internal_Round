@@ -20,12 +20,12 @@ func newInspectCmd() *cobra.Command {
 			}
 			data, err := os.ReadFile(args[0])
 			if err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
+				emitErr(cmd, err.Error())
 				return &exitErr{code: exitcodes.InvalidInput}
 			}
 			var r runner.VerifyResult
 			if err := json.Unmarshal(data, &r); err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "error: malformed result JSON: %v\n", err)
+				emitErr(cmd, "malformed result JSON: "+err.Error())
 				return &exitErr{code: exitcodes.InvalidInput}
 			}
 			human := fmt.Sprintf("decision: %s\nartifact: %s\nsource: %s\npolicy: %s\noss: %s\n",

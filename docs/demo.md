@@ -28,3 +28,15 @@ anchor + dashboard URL + all 5 prompt scenarios) arrives with later phases.
 - Caveat: the VERIFIED API case reused one host digest under two group labels
   (same-host reruns, not true independence) — valid as a pipeline proof, not
   as an independence claim.
+
+## Live OSS Rebuild run (executed 2026-10-03, `pypi:absl-py@2.0.0`)
+
+- Downloaded the real wheel from files.pythonhosted.org; local sha256
+  `9a28abb6…` equals the OSS Rebuild upstream digest exactly.
+- `quorum verify pypi:absl-py@2.0.0 --repo https://github.com/abseil/abseil-py
+  --commit 37dad4d3… --artifact <wheel> --oss-mode live` →
+  **4 independent groups agree** (3 builders + oss-rebuild), source commit
+  matches the rebuild's pinned commit, `SUPPORTED_AND_VERIFIED`, exit 0.
+- Control case (pinned fixture vs live absl evidence): OSS row correctly
+  **excluded with "source commit mismatch"** — visible in `excludedEvidence`,
+  never counted, never hidden.

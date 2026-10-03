@@ -21,9 +21,7 @@ func newPolicyCmd() *cobra.Command {
 			}
 			pol, err := runner.LoadPolicyFile(path)
 			if err != nil {
-				if !useJSON(cmd) {
-					fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
-				}
+			emitErr(cmd, err.Error())
 				return &exitErr{code: exitcodes.InvalidInput}
 			}
 			hash, _ := runner.PolicyHash(pol)
@@ -47,9 +45,7 @@ func newPolicyCmd() *cobra.Command {
 			}
 			res, pol, err := runner.RunPolicyTest(pf, ef)
 			if err != nil {
-				if !useJSON(cmd) {
-					fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
-				}
+			emitErr(cmd, err.Error())
 				return &exitErr{code: exitcodes.InvalidInput}
 			}
 			human := fmt.Sprintf("decision: %s\nrequired: %d satisfied: %d\n", res.Decision, res.Required, res.Satisfied)

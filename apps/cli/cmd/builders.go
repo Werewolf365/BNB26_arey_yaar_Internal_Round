@@ -18,7 +18,7 @@ func newBuildersCmd() *cobra.Command {
 			reg, _ := cmd.Flags().GetString("registry")
 			regs, err := runner.LoadRegistry(reg)
 			if err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
+				emitErr(cmd, err.Error())
 				return &exitErr{code: exitcodes.Operational}
 			}
 			human := ""
@@ -46,9 +46,7 @@ func newBuildersCmd() *cobra.Command {
 				ID: id, DisplayName: name, IndependenceGroup: group, Endpoint: endpoint,
 			})
 			if err != nil {
-				if !useJSON(cmd) {
-					fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
-				}
+			emitErr(cmd, err.Error())
 				return &exitErr{code: exitcodes.InvalidInput}
 			}
 			return emit(cmd, fmt.Sprintf("registered %s (group %s)\n", id, group),

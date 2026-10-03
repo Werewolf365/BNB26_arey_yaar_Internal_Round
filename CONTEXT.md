@@ -32,7 +32,9 @@
 1. **Builder workers** — DONE: orchestrator queue + `quorum-worker`, real rebuild
    jobs end-to-end via API (live VERIFIED on `golang/example`). Remote/fleet
    builders remain future work.
-2. **OSS Rebuild live path** — real CLI integration (`test-external`), supported-package demo.
+2. **OSS Rebuild live path** — DONE: real CLI adapter (`services/ossrebuild`,
+   all six states) + `verify --oss-mode live` (live 4-group VERIFIED on
+   `absl-py 2.0.0`). Fixture mode stays default for deterministic CI.
 3. **Sigstore/Cosign** — replace test keys; transparency + identity checks.
 4. **Web dashboard** — Next.js: releases/builders/policy/audit/evidence pages + Playwright suite.
 5. **Object storage wiring** — evidence blobs to S3-compat (content-addressed).

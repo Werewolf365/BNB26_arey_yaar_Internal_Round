@@ -3,7 +3,8 @@
 Primary developer interface. Global flags: `--json` (machine output),
 `--quiet` (silent stdout; exit code only), `--verbose` (diagnostics).
 Rules: `--json` wins over `--quiet` for stdout; errors always go to stderr
-(even under `--quiet`) unless `--json` is set.
+(even under `--quiet`) unless `--json` is set — in which case stderr carries
+a `{"error": ...}` envelope (never silence, never stdout pollution).
 
 ## Commands
 
@@ -13,6 +14,8 @@ Rules: `--json` wins over `--quiet` for stdout; errors always go to stderr
 | `quorum verify --repo URL --commit SHA --artifact FILE` | verify a file artifact (exit 0–5) |
 | `quorum verify pypi:name@ver` (also `npm:`, `cargo:`) | package-ref form; OSS Rebuild fixture evidence labeled in output |
 | `quorum verify ... --expected-digest sha256:..` | tamper tripwire: mismatch → `REJECTED` (1) |
+| `quorum verify pypi:absl-py@2.0.0 --oss-mode live` | shell the real `oss-rebuild` CLI; verified rebuilds join as `oss-rebuild` evidence (own independence group) |
+| `quorum verify ... --oss-bin PATH` | override the `oss-rebuild` executable lookup |
 | `quorum verify ... --policy-file P --min-builders N --required-agreement N --required-groups N --tolerance N` | policy control (`--tolerance -1` = default) |
 | `quorum builders list [--registry F]` | list registry (default `builders.json`) |
 | `quorum builders register --id ID --group G [--name N] [--endpoint E]` | register; duplicates / missing group rejected |

@@ -45,6 +45,19 @@ func TestVerifyMatrix(t *testing.T) {
 	if code, out, errOut := execute("verify", "--repo", "https://evil.example/x", "--commit", "c", "--fixture-tiny", "--quiet"); code != 5 || out != "" || !strings.Contains(errOut, "INVALID_INPUT") {
 		t.Fatalf("quiet errors must reach stderr with exit 5: %d %q %q", code, out, errOut)
 	}
+	// JSON mode reports errors as envelopes on stderr, never silence.
+	if code, out, errOut := execute("verify", "--repo", "https://evil.example/x", "--commit", "c", "--fixture-tiny", "--json"); code != 5 || out != "" {
+		t.Fatalf("json errors must not pollute stdout: %d %q", code, out)
+	} else {
+		var env map[string]string
+		if err := json.Unmarshal([]byte(errOut), &env); err != nil || !strings.Contains(env["error"], "INVALID_INPUT") {
+			t.Fatalf("json error envelope: %v %q", err, errOut)
+		}
+	}
+	// Live OSS mode without a package ref is invalid input.
+	if code, _, _ := execute("verify", "--repo", "https://github.com/example/tiny", "--commit", "c", "--fixture-tiny", "--oss-mode", "live"); code != 5 {
+		t.Fatalf("live without ref must exit 5, got %d", code)
+	}
 	if code, _, _ := execute(append(append([]string{}, base...), "--inject-conflict", "builder-c")...); code != 3 {
 		t.Fatalf("conflict must exit 3, got %d", code)
 	}

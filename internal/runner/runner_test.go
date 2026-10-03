@@ -305,3 +305,54 @@ func TestBlockchainInputValidation(t *testing.T) {
 		t.Fatal("ERROR must encode 5")
 	}
 }
+
+func TestOssModeValidation(t *testing.T) {
+	o := baseOpts()
+	o.OssMode = "live" // no PkgRef: nothing to look up
+	_, code, _, err := runner.RunVerify(o)
+	if err == nil || code != exitcodes.InvalidInput {
+		t.Fatalf("live mode without package ref must be invalid input: %v", code)
+	}
+}
+
+// TestOssLiveWiring shells the real CLI (env-gated). The tiny fixture digest
+// never equals the absl-py upstream digest, so the OSS row must appear as a
+// surfaced conflict or a source exclusion -- never vanish, never flip the
+// builders agreement.
+func TestOssLiveWiring(t *testing.T) {
+	if os.Getenv("QUORUM_LIVE_OSS") != "1" {
+		t.Skip("set QUORUM_LIVE_OSS=1 with oss-rebuild on PATH")
+	}
+	o := baseOpts()
+	o.PkgRef = "pypi:absl-py@2.0.0"
+	o.FixtureTiny = true
+	o.Repo = "https://pypi.org/project/absl-py"
+	o.Commit = "abc123"
+	o.OssMode = "live"
+	res, code, _, err := runner.RunVerify(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OssState != "SUPPORTED_AND_VERIFIED" {
+		t.Fatalf("want live verified state, got %s (%v)", res.OssState, res.Reasons)
+	}
+	if code != 0 && code != 3 {
+		t.Fatalf("builders agree, so decision must be 0 or 3, got %d (%s)", code, res.Decision)
+	}
+	seen := false
+	for _, c := range res.Conflicts {
+		for _, b := range c.Builders {
+			if b == "oss-rebuild" {
+				seen = true
+			}
+		}
+	}
+	for _, x := range res.Excluded {
+		if x.Evidence.BuilderID == "oss-rebuild" {
+			seen = true
+		}
+	}
+	if !seen {
+		t.Fatalf("oss-rebuild evidence must be visible (conflict or exclusion): %+v", res)
+	}
+}

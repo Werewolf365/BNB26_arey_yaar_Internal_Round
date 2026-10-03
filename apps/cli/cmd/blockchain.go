@@ -30,16 +30,12 @@ and independently verify the VerificationAnchored event. With --required=false
 			o.Require, _ = cmd.Flags().GetBool("required")
 			if o.Contract == "" || o.VerificationID == "" || o.EvidenceHash == "" ||
 				o.ArtifactDigest == "" || o.SourceCommit == "" || o.PolicyHash == "" || o.Decision == "" {
-				if !useJSON(cmd) {
-					fmt.Fprintln(cmd.ErrOrStderr(), "error: all of --contract/--verification-id/--evidence-hash/--artifact-digest/--source-commit/--policy-hash/--decision are required")
-				}
+			emitErr(cmd, "all of --contract/--verification-id/--evidence-hash/--artifact-digest/--source-commit/--policy-hash/--decision are required")
 				return &exitErr{code: exitcodes.InvalidInput}
 			}
 			res, err := runner.RunAnchor(o)
 			if err != nil {
-				if !useJSON(cmd) {
-					fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
-				}
+			emitErr(cmd, err.Error())
 				if isInputErr(err) {
 					return &exitErr{code: exitcodes.InvalidInput}
 				}

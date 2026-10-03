@@ -1,7 +1,32 @@
-# OSS Rebuild integration boundary
+# OSS Rebuild integration (live path implemented)
 
 Google OSS Rebuild is the initial external evidence layer (one source, not an
 automatic quorum member; duplicates never double-counted).
+
+## Real interface (verified against the live CLI, Oct 2026)
+
+- Install: `go install github.com/google/oss-rebuild/cmd/oss-rebuild@latest`.
+- Ecosystems on the wire: **`npm`, `pypi`, `cratesio`** (Quorum maps `cargo:` → `cratesio`).
+- `oss-rebuild list pypi absl-py` — versions with attestations.
+- `oss-rebuild get pypi absl-py 2.0.0` — summary (`Rebuild found!`, upstream
+  digest, pinned source commit, Dockerfile); `--output=payload|bundle|
+  dockerfile|build|steps`.
+- Reads need **no credentials**; signature verification is on by default.
+- CLI quirks the adapter handles (all covered by tests): human markers and the
+  artifact-inference NOTE go to **stderr** (machine parsing uses stdout);
+  `--output=payload` appends extra top-level JSON documents after the
+  statement (first-document validation, whole blob preserved).
+
+## Go adapter (`services/ossrebuild`)
+
+`Provider{Bin, Timeout, MaxAttempts}` with `Lookup(pkgRef)` normalizing to
+`SUPPORTED_AND_VERIFIED / SUPPORTED_BUT_FAILED / UNSUPPORTED / NOT_FOUND /
+UNAVAILABLE / MALFORMED_EVIDENCE`: upstream digest + source commit extracted
+from the summary, full signed payload preserved (in-toto/SLSA-validated lead
+document), timeouts + one safe retry. `quorum verify --oss-mode live` attaches
+verified rebuilds as `oss-rebuild` evidence under its own independence group —
+agreement counts, disagreement surfaces as conflict, commit drift is excluded
+with a reason.
 
 - Supported ecosystems (per current docs): **npm, PyPI, Crates.io — only a subset
   of popular packages actually rebuilt**. CLI retrieves rebuild summaries, payloads,

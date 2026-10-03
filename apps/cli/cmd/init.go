@@ -34,13 +34,11 @@ func newInitCmd() *cobra.Command {
 			}
 			path := dir + "/quorum.yaml"
 			if _, err := os.Stat(path); err == nil && !force {
-				if !useJSON(cmd) {
-					fmt.Fprintf(cmd.ErrOrStderr(), "error: %s exists (use --force to overwrite)\n", path)
-				}
+				emitErr(cmd, path+" exists (use --force to overwrite)")
 				return &exitErr{code: exitcodes.InvalidInput}
 			}
 			if err := os.WriteFile(path, []byte(initTemplate), 0o600); err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
+				emitErr(cmd, err.Error())
 				return &exitErr{code: exitcodes.Operational}
 			}
 			return emit(cmd, fmt.Sprintf("initialized %s\n", path), map[string]string{"path": path})

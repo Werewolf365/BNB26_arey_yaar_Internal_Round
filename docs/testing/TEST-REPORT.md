@@ -74,7 +74,22 @@ enqueued → completed ×2 → evaluated). Failure path tested (3× fail →
 (host git 2.51 vs container 2.39.5) proven and documented — comparability
 requires homogeneous builder images.
 
-## 8. Gates and suites intentionally separate
+## 8. OSS Rebuild live path (executed 2026-10-03)
+
+Real CLI installed (`go install .../cmd/oss-rebuild@latest`) and probed:
+`list`/`get` need no credentials; `--verify` on by default. Adapter
+(`services/ossrebuild`) tested live (`QUORUM_LIVE_OSS=1`): `pypi:absl-py@2.0.0`
+→ `SUPPORTED_AND_VERIFIED` with pinned upstream digest
+`sha256:9a28abb6…` + source commit `37dad4d…`, raw payload preserved
+(first-document in-toto/SLSA validated); bogus version → `NOT_FOUND`;
+`docker:` ref → `UNSUPPORTED`. Two real CLI quirks found by failing tests and
+fixed: human markers on stderr, multi-document payload output.
+CLI wiring (`--oss-mode live`): real wheel downloaded (local sha256 matches
+upstream exactly) → **4 independent groups agree**, exit 0; drift control case
+excludes the OSS row with "source commit mismatch". JSON-mode errors now emit
+`{"error":…}` envelopes on stderr (tested).
+
+## 9. Gates and suites intentionally separate
 
 `make test-all` = deterministic only. Live externals (real OSS Rebuild/ADC,
 testnets) live in `make test-external` and never gate CI. CI runs unit +

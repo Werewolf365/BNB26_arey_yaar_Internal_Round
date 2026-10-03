@@ -39,6 +39,12 @@ type VerifyOptions struct {
 
 	MaxBytes int64
 
+	// OssMode: "fixture" (default, deterministic label only) or "live"
+	// (shell the real oss-rebuild CLI; requires PkgRef).
+	OssMode string
+	// OssBin overrides the oss-rebuild executable lookup (PATH by default).
+	OssBin string
+
 	Verbose bool
 }
 
@@ -48,12 +54,14 @@ type VerifyResult struct {
 	Required   int           `json:"required"`
 	Satisfied  int           `json:"satisfied"`
 	Conflicts  []policy.Conflict `json:"conflicts"`
+	Excluded   []policy.ExcludedItem `json:"excludedEvidence"`
 	Reasons    []string      `json:"reasons"`
 	Artifact   string        `json:"artifactDigest"`
 	Source     string        `json:"sourceCommit"`
 	PolicyID   string        `json:"policyId"`
 	OssState   string        `json:"ossRebuildState"`
 	Simulated  []string      `json:"simulated,omitempty"`
+	Notes      []string      `json:"notes,omitempty"`
 }
 
 // DefaultBuilders returns the three demo builders with distinct groups.
@@ -190,17 +198,38 @@ func RunVerify(o VerifyOptions) (*VerifyResult, int, string, error) {
 	// OSS Rebuild fixture evidence (informational; counted only if it agrees
 	// and carries a distinct builder id — never double-counted).
 	ossState, ossDetail := "SKIPPED", "no package ref given"
+	var notes []string
 	if o.PkgRef != "" {
 		ossState, ossDetail = OssFixture(o.PkgRef)
 		_ = ossDetail
+		if o.OssMode == "" {
+			o.OssMode = "fixture"
+		}
+		if o.OssMode == "live" {
+			live := liveOssEvidence(o)
+			if live.err != nil {
+				ossState = "UNAVAILABLE"
+				notes = append(notes, "oss-rebuild live lookup failed: "+live.err.Error())
+			} else {
+				ossState = live.state
+				if live.evidence != nil {
+					evidence = append(evidence, *live.evidence)
+					notes = append(notes, "oss-rebuild live evidence ("+live.state+")")
+				} else if live.note != "" {
+					notes = append(notes, "oss-rebuild: "+live.note)
+				}
+			}
+		}
+	} else if o.OssMode == "live" {
+		return nil, exitcodes.InvalidInput, "", fmt.Errorf("INVALID_INPUT: --oss-mode live requires a package ref argument")
 	}
 
 	res := policy.Evaluate(pol, commit, evidence)
 	out2 := &VerifyResult{
 		Decision: res.Decision, Required: res.Required, Satisfied: res.Satisfied,
-		Conflicts: res.Conflicts, Reasons: res.Reasons,
+		Conflicts: res.Conflicts, Excluded: res.ExcludedEvidence, Reasons: res.Reasons,
 		Artifact: digest, Source: commit, PolicyID: pol.PolicyID,
-		OssState: ossState, Simulated: simulated,
+		OssState: ossState, Simulated: simulated, Notes: notes,
 	}
 	if ossState != "SKIPPED" && o.Verbose {
 		out2.Reasons = append(out2.Reasons, "oss-rebuild: "+ossState)
@@ -235,6 +264,9 @@ func humanReport(r *VerifyResult, pol *policy.Policy, verbose bool, elapsed time
 	}
 	for _, s := range r.Simulated {
 		fmt.Fprintf(&b, "  [simulated]               %s\n", s)
+	}
+	for _, n := range r.Notes {
+		fmt.Fprintf(&b, "  Note:                     %s\n", n)
 	}
 	b.WriteString("POLICY\n")
 	fmt.Fprintf(&b, "  Required:                 %d agreement\n", r.Required)

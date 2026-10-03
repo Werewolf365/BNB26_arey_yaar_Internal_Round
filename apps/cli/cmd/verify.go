@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/quorum/quorum/internal/exitcodes"
 	"github.com/quorum/quorum/internal/runner"
 	"github.com/spf13/cobra"
@@ -29,14 +27,10 @@ Exit codes: 0=verified 1=rejected 2=insufficient evidence
 			res, code, human, err := runner.RunVerify(o)
 			if err != nil {
 				if code == exitcodes.InvalidInput {
-					if !useJSON(cmd) {
-						fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
-					}
+					emitErr(cmd, err.Error())
 					return &exitErr{code: code}
 				}
-				if !useJSON(cmd) {
-					fmt.Fprintf(cmd.ErrOrStderr(), "operational error: %v\n", err)
-				}
+				emitErr(cmd, "operational error: "+err.Error())
 				return &exitErr{code: exitcodes.Operational}
 			}
 			payload := res
@@ -65,5 +59,7 @@ Exit codes: 0=verified 1=rejected 2=insufficient evidence
 	c.Flags().IntVar(&o.RequiredGroups, "required-groups", 0, "override required independent groups (0 = default)")
 	c.Flags().IntVar(&o.ConflictTolerance, "tolerance", -1, "override conflict tolerance (-1 = default)")
 	c.Flags().StringVar(&o.PolicyFile, "policy-file", "", "full JSON policy file (overrides scalar flags)")
+	c.Flags().StringVar(&o.OssMode, "oss-mode", "fixture", "oss-rebuild evidence: fixture (deterministic label) or live (shells the real CLI)")
+	c.Flags().StringVar(&o.OssBin, "oss-bin", "", "oss-rebuild executable (default: PATH lookup)")
 	return c
 }

@@ -36,6 +36,17 @@ func emit(cmd *cobra.Command, human string, v any) error {
 	return nil
 }
 
+// emitErr reports errors to stderr in both modes: plain text by default,
+// a {"error":...} envelope under --json so machine consumers never get
+// silence. --quiet never suppresses errors.
+func emitErr(cmd *cobra.Command, text string) {
+	if useJSON(cmd) {
+		data, _ := json.Marshal(map[string]string{"error": text})
+		fmt.Fprintln(cmd.ErrOrStderr(), string(data))
+		return
+	}
+	fmt.Fprintln(cmd.ErrOrStderr(), "error: "+text)
+}
 // exitErr carries a process exit code through Cobra's error path.
 type exitErr struct{ code int }
 

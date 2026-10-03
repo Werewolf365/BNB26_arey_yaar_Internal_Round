@@ -73,8 +73,9 @@ test-security:
 	node --test test/security.*.test.mjs
 
 test-external:
-	@echo "[external] REAL OSS Rebuild / testnet tests (require ADC creds + network). Not run in CI by default."
+	@echo "[external] REAL OSS Rebuild / testnet tests (require network + oss-rebuild CLI; never in test-all)."
 	OSS_REBUILD_MODE=live node --test test/external.*.test.mjs || echo "[external] SKIP: no credentials / tool absent"
+	QUORUM_LIVE_OSS=1 go test -run 'TestLiveLookup|TestOssLiveWiring' ./services/ossrebuild/ ./internal/runner/ || echo "[external] SKIP: oss-rebuild CLI absent"
 
 test-all:
 	@echo "=== Quorum test-all (self-provisioning, deterministic, no external creds) ==="

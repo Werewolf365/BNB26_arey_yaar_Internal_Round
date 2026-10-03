@@ -34,7 +34,7 @@ func newEvidenceCmd() *cobra.Command {
 			o.Verbose = verbose
 			res, code, _, err := runner.RunVerify(o)
 			if err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
+				emitErr(cmd, err.Error())
 				return &exitErr{code: exitcodes.Operational}
 			}
 			bundle := map[string]any{
@@ -46,7 +46,7 @@ func newEvidenceCmd() *cobra.Command {
 				return &exitErr{code: exitcodes.Operational}
 			}
 			if err := os.WriteFile(output, data, 0o600); err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
+				emitErr(cmd, err.Error())
 				return &exitErr{code: exitcodes.Operational}
 			}
 			if err := emit(cmd, fmt.Sprintf("evidence bundle written to %s (decision %s)\n", output, res.Decision), bundle); err != nil {

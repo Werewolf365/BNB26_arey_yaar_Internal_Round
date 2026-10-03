@@ -28,9 +28,7 @@ func newAuditCmd() *cobra.Command {
 				return &exitErr{code: exitcodes.InvalidInput}
 			}
 			if err != nil {
-				if !useJSON(cmd) {
-					fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
-				}
+			emitErr(cmd, err.Error())
 				return &exitErr{code: exitcodes.InvalidInput}
 			}
 			if tamper && len(chain) > 1 {

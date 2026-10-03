@@ -55,4 +55,4 @@ Routes + typed error codes: `docs/api.md`. Live loop proven: release → verific
 
 Signature valid != safe. Rebuild match != benign source. 2-agree != absolute.
 Every decision exposes predicates, counted/excluded evidence, and conflicts.
-See `docs/`, `SECURITY.md`, `docs/limitations.md`.
+See `docs/`, `SECURITY.md`, `docs/limitations.md`, `docs/HANDOFF.md`.

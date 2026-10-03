@@ -54,6 +54,15 @@ QUORUM_TEST_POSTGRES=1 go test -run TestPostgresIntegration ./apps/api/...
 QUORUM_LIVE_ANVIL=1 go test -run TestAnchorLive ./internal/runner/
 ```
 
+## Handoff / stop point (2026-10-03)
+
+Last stable: `ead8dca` (green build/tests). Uncommitted leftovers are
+documented field-by-field in `docs/HANDOFF.md`: Sigstore package +
+`attest` CLI complete with tests; storage backend complete with tests;
+API storage wiring intentionally left half-edited (only breakage, by design
+of the pause). Every new capability above has focused tests; the
+half-implemented server wiring is exactly where work resumes.
+
 ## Map
 
 `apps/cli` `apps/api` `services/{policy,canonical,attestation,audit,verification,oss-rebuild,builders,blockchain}`

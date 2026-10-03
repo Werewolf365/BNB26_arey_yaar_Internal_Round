@@ -1,0 +1,1 @@
+{"scenario":"conflicting-builders","builders":{"builder-a":"sha256:abc","builder-b":"sha256:abc","builder-c":"sha256:def"},"want":"VERIFIED_WITH_CONFLICT"}

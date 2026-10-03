@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "QuorumDecision",
+  "type": "object",
+  "required": ["decision", "required", "satisfied", "conflicts", "countedEvidence", "excludedEvidence", "reasons"],
+  "properties": {
+    "decision": { "enum": ["VERIFIED", "VERIFIED_WITH_CONFLICT", "INSUFFICIENT_EVIDENCE", "REJECTED", "INVESTIGATE", "ERROR"] },
+    "required": { "type": "integer" },
+    "satisfied": { "type": "integer" },
+    "conflicts": { "type": "array", "items": { "type": "object" } },
+    "countedEvidence": { "type": "array", "items": { "type": "object" } },
+    "excludedEvidence": { "type": "array", "items": { "type": "object" } },
+    "reasons": { "type": "array", "items": { "type": "string" } }
+  }
+}

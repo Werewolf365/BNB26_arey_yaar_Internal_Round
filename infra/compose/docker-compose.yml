@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: quorum
+      POSTGRES_PASSWORD: quorum
+      POSTGRES_DB: quorum
+    # Host port 5433: 5432 is commonly taken by a machine-local PostgreSQL.
+    ports: ["5433:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+  minio:
+    # S3-compatible object store for evidence bundles (MinIO images went
+    # auth-gated; LocalStack S3 is public and sufficient for dev/test).
+    image: localstack/localstack:latest
+    environment:
+      SERVICES: s3
+      DEFAULT_REGION: us-east-1
+    ports: ["4566:4566"]
+    volumes: [miniodata:/var/lib/localstack]
+  anvil:
+    # Real chain for anchor tests when daemon is up; optional (BLOCKCHAIN_REQUIRED=false).
+    image: ghcr.io/foundry-rs/foundry:latest
+    entrypoint: ["anvil"]
+    command: ["--host", "0.0.0.0", "--port", "8545"]
+    ports: ["8545:8545"]
+volumes:
+  pgdata:
+  miniodata:

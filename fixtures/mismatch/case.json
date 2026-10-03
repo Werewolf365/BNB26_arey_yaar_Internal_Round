@@ -1,0 +1,1 @@
+{"scenario":"mismatch","note":"valid artifact plus one appended byte; verifier must emit ARTIFACT_HASH_MISMATCH/REJECTED","validBytes":"quorum-tiny-artifact-v1","evilBytes":"quorum-tiny-artifact-v1X"}

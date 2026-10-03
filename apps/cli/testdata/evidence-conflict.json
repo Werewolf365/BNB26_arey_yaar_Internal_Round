@@ -1,0 +1,8 @@
+{
+  "expectedSource": "abc123",
+  "evidence": [
+    {"builderId": "builder-a", "independenceGroup": "cloud-a", "sourceCommit": "abc123", "artifactDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "signatureValid": true, "verificationSource": "builder"},
+    {"builderId": "builder-b", "independenceGroup": "cloud-b", "sourceCommit": "abc123", "artifactDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "signatureValid": true, "verificationSource": "builder"},
+    {"builderId": "builder-c", "independenceGroup": "cloud-c", "sourceCommit": "abc123", "artifactDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "signatureValid": true, "verificationSource": "builder"}
+  ]
+}

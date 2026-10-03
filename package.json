@@ -1,0 +1,15 @@
+{
+  "name": "quorum-slice1-harness",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Node reference harness for Quorum Slice 1 (Go is source of truth; this harness runs the same JSON test vectors on machines without a Go toolchain)",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test-unit": "node --test test/*.test.mjs",
+    "doctor": "node scripts/doctor.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

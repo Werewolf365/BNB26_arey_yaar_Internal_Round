@@ -1,0 +1,36 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  slice1:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci || npm install --no-audit --no-fund
+      - run: npm test
+      - run: node scripts/slice1-demo.mjs
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.27.1' }  # pinned; must match go.mod toolchain
+      - run: go version
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go build -o quorum ./apps/cli
+      - run: ./quorum verify --repo https://github.com/example/tiny --commit abc123 --fixture-tiny
+      - run: ./quorum audit verify --demo
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: quorum
+          POSTGRES_PASSWORD: quorum
+          POSTGRES_DB: quorum
+        ports: ["5433:5432"]
+        options: --health-cmd="pg_isready -U quorum" --health-interval=5s --health-retries=5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.27.1' }
+      - run: QUORUM_TEST_POSTGRES=1 QUORUM_TEST_DATABASE_URL=postgres://quorum:quorum@localhost:5433/quorum?sslmode=disable go test -run TestPostgresIntegration ./apps/api/...

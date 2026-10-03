@@ -1,0 +1,14 @@
+node_modules/
+build/
+dist/
+coverage.out
+.env
+.env.local
+quorum
+quorum.exe
+quorum-api
+quorum-api.exe
+contracts/out/
+contracts/cache/
+builders.json
+quorum.yaml

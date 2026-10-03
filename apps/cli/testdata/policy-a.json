@@ -1,0 +1,11 @@
+{
+  "policyId": "policy-a",
+  "version": "v1",
+  "minBuilders": 2,
+  "requiredAgreement": 2,
+  "requiredIndependentGroups": 2,
+  "requireSourceMatch": true,
+  "requireAllSignaturesValid": true,
+  "conflictTolerance": 1,
+  "allowedVerificationSources": ["builder", "oss-rebuild"]
+}

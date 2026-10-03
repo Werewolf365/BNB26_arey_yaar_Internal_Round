@@ -1,0 +1,59 @@
+{
+  "comment": "Shared conformance vectors asserted by BOTH the Go engine and the Node mirror. If either implementation drifts, its suite fails. Do not edit expectations to match code; fix the code.",
+  "canonicalCases": [
+    {"input": {"b": 2, "a": 1}, "want": "{\"a\":1,\"b\":2}"},
+    {"input": {"z": {"d": [3, 2, {"b": false, "a": null}], "c": "x"}, "a": 0}, "want": "{\"a\":0,\"z\":{\"c\":\"x\",\"d\":[3,2,{\"a\":null,\"b\":false}]}}"},
+    {"input": {"empty": {}, "list": [], "s": "caf\u00e9"}, "want": "{\"empty\":{},\"list\":[],\"s\":\"caf\u00e9\"}"},
+    {"input": [3, {"b": 1, "a": 2}, "x"], "want": "[3,{\"a\":2,\"b\":1},\"x\"]"}
+  ],
+  "quorumCases": [
+    {
+      "name": "two independent agree",
+      "policy": {"policyId": "p", "version": "v1", "minBuilders": 2, "requiredAgreement": 2, "requiredIndependentGroups": 2, "requireSourceMatch": true, "requireAllSignaturesValid": true, "conflictTolerance": 1, "allowedVerificationSources": ["builder"]},
+      "expectedSource": "abc123",
+      "evidence": [
+        {"builderId": "a", "independenceGroup": "g1", "sourceCommit": "abc123", "artifactDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "signatureValid": true, "verificationSource": "builder"},
+        {"builderId": "b", "independenceGroup": "g2", "sourceCommit": "abc123", "artifactDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "signatureValid": true, "verificationSource": "builder"}
+      ],
+      "wantDecision": "VERIFIED",
+      "wantSatisfied": 2,
+      "wantConflicts": 0
+    },
+    {
+      "name": "conflict surfaced",
+      "policy": {"policyId": "p", "version": "v1", "minBuilders": 2, "requiredAgreement": 2, "requiredIndependentGroups": 2, "requireSourceMatch": true, "requireAllSignaturesValid": true, "conflictTolerance": 1, "allowedVerificationSources": ["builder"]},
+      "expectedSource": "abc123",
+      "evidence": [
+        {"builderId": "a", "independenceGroup": "g1", "sourceCommit": "abc123", "artifactDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "signatureValid": true, "verificationSource": "builder"},
+        {"builderId": "b", "independenceGroup": "g2", "sourceCommit": "abc123", "artifactDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "signatureValid": true, "verificationSource": "builder"},
+        {"builderId": "c", "independenceGroup": "g3", "sourceCommit": "abc123", "artifactDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "signatureValid": true, "verificationSource": "builder"}
+      ],
+      "wantDecision": "VERIFIED_WITH_CONFLICT",
+      "wantSatisfied": 2,
+      "wantConflicts": 1
+    },
+    {
+      "name": "same group not independent",
+      "policy": {"policyId": "p", "version": "v1", "minBuilders": 2, "requiredAgreement": 2, "requiredIndependentGroups": 2, "requireSourceMatch": true, "requireAllSignaturesValid": true, "conflictTolerance": 1, "allowedVerificationSources": ["builder"]},
+      "expectedSource": "abc123",
+      "evidence": [
+        {"builderId": "a", "independenceGroup": "aws", "sourceCommit": "abc123", "artifactDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "signatureValid": true, "verificationSource": "builder"},
+        {"builderId": "b", "independenceGroup": "aws", "sourceCommit": "abc123", "artifactDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "signatureValid": true, "verificationSource": "builder"}
+      ],
+      "wantDecision": "INSUFFICIENT_EVIDENCE",
+      "wantSatisfied": 1,
+      "wantConflicts": 0
+    },
+    {
+      "name": "determinism probe",
+      "policy": {"policyId": "p", "version": "v1", "minBuilders": 1, "requiredAgreement": 1, "requiredIndependentGroups": 1, "requireSourceMatch": false, "requireAllSignaturesValid": false, "conflictTolerance": 5, "allowedVerificationSources": []},
+      "expectedSource": "anything",
+      "evidence": [
+        {"builderId": "z", "independenceGroup": "g9", "sourceCommit": "x", "artifactDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "signatureValid": false, "verificationSource": "custom"}
+      ],
+      "wantDecision": "VERIFIED",
+      "wantSatisfied": 1,
+      "wantConflicts": 0
+    }
+  ]
+}

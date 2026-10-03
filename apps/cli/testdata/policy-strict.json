@@ -1,0 +1,11 @@
+{
+  "policyId": "policy-strict",
+  "version": "v1",
+  "minBuilders": 3,
+  "requiredAgreement": 3,
+  "requiredIndependentGroups": 3,
+  "requireSourceMatch": true,
+  "requireAllSignaturesValid": true,
+  "conflictTolerance": 0,
+  "allowedVerificationSources": ["builder"]
+}

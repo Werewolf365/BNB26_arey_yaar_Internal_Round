@@ -1,0 +1,9 @@
+name: quorum-tiny
+version: 1.0.0
+# Tiny deterministic fixture package for Slice-1 demo.
+# Real packaging would publish this; here the "build" is a fixed byte string
+# so Builder A/B/C digests are reproducible without network.
+sourceCommit: abc123
+artifact: tiny-1.0.0.tar.gz
+buildCommand: printf 'quorum-tiny-artifact-v1' > tiny-1.0.0.tar.gz
+expectedSha256Note: computed at demo runtime from the fixed bytes above

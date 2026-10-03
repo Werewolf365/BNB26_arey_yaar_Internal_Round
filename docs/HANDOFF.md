@@ -34,7 +34,8 @@ Also hardened earlier: `--json` CLI errors now emit `{"error":...}` on stderr
 ## Remaining from the roadmap
 
 1. Web dashboard (Next.js + Playwright).
-2. Real Cosign/Rekor adapter (current dev file log is intentionally NOT production).
+2. Cosign keyless/Fulcio + DSSE `verify-blob-attestation` policy path (explicit-key
+   blob sign/verify + Rekor reads are live; see `services/cosign/`).
 3. S3-compatible object storage backend config (Filesystem backend is live).
 4. Production hardening (auth/rate-limits/archive-sandbox/quotas/SBOM/signing/scans).
 5. Coverage gate 90%/95% (currently ~70–85% measured).

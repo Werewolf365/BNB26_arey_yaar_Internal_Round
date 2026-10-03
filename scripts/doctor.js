@@ -29,7 +29,7 @@ const tools = [
   ["go", "version", "Go (pinned: go1.27.x per go.mod toolchain; CI enforces). Install: https://go.dev/dl/" + (isWin ? " — Windows: winget install GoLang.Go.Gzip or MSI from go.dev" : "")],
   ["node", "--version", "Node 20+ required for slice-1 harness + web."],
   ["docker", "--version", "Docker for builders/postgres/minio/anvil." + (isWin ? " Windows: start Docker Desktop; daemon must be running (npipe)." : "")],
-  ["cosign", "version", "Cosign for Sigstore verification (later phase). Install: https://docs.sigstore.dev/cosign/installation/"],
+  ["cosign", "version", "Cosign for Sigstore blob verification (services/cosign + `attest cosign-sign/cosign-verify/rekor-get`). Install: https://docs.sigstore.dev/cosign/installation/"],
   ["forge", "--version", "Foundry forge for contracts. No host install needed: Docker image ghcr.io/foundry-rs/foundry:latest works (see scripts/forge-docker.ps1 + docs/blockchain.md). Windows PowerShell: curl|bash foundryup does NOT work in stock PowerShell 5.1."],
   ["anvil", "--version", "Anvil local chain (comes with Foundry; or compose `anvil` service, chainId 31337)."],
   ["git", "--version", "Git for pinned source checkout."],

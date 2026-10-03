@@ -1,14 +1,17 @@
 package cmd
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/quorum/quorum/internal/exitcodes"
+	qcosign "github.com/quorum/quorum/services/cosign"
 	"github.com/quorum/quorum/services/sigstore"
 	"github.com/spf13/cobra"
 )
@@ -169,7 +172,7 @@ func newAttestCmd() *cobra.Command {
 	verify.Flags().String("expect-commit", "", "required source commit")
 	verify.Flags().StringSlice("allow-builder", nil, "allowlisted builder id (repeatable)")
 
-	a.AddCommand(gen, sign, verify)
+	a.AddCommand(gen, sign, verify, newCosignSignCmd(), newCosignVerifyCmd(), newRekorGetCmd())
 	return a
 }
 
@@ -187,4 +190,131 @@ func builderOf(st sigstore.Statement) string {
 		}
 	}
 	return ""
+}
+
+// cosignExit maps adapter states onto the CLI exit contract (prompt
+// section 40): 0 verified, 1 rejected (bad signature), 4 operational
+// (binary missing / log unreachable), 5 invalid input.
+func cosignExit(state string) int {
+	switch state {
+	case qcosign.StateVerified:
+		return exitcodes.Verified
+	case qcosign.StateInvalidSig:
+		return exitcodes.Rejected
+	case qcosign.StateUnavailable:
+		return exitcodes.Operational
+	default:
+		return exitcodes.InvalidInput
+	}
+}
+
+func newCosignSignCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "cosign-sign --artifact FILE --key KEYREF --output-signature SIG",
+		Short: "Sign a blob with the real cosign CLI (explicit key, no keyless)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			artifact, _ := cmd.Flags().GetString("artifact")
+			keyRef, _ := cmd.Flags().GetString("key")
+			sigOut, _ := cmd.Flags().GetString("output-signature")
+			bundleOut, _ := cmd.Flags().GetString("output-bundle")
+			bin, _ := cmd.Flags().GetString("cosign-bin")
+			if artifact == "" || keyRef == "" || sigOut == "" {
+				emitErr(cmd, "--artifact, --key and --output-signature are required")
+				return &exitErr{code: exitcodes.InvalidInput}
+			}
+			p := qcosign.DefaultProvider()
+			if bin != "" {
+				p.Bin = bin
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+			defer cancel()
+			res := p.SignBlob(ctx, keyRef, artifact, sigOut, bundleOut)
+			if res.State != qcosign.StateVerified {
+				emitErr(cmd, res.Detail)
+				return &exitErr{code: cosignExit(res.State)}
+			}
+			return emit(cmd, "signed "+sigOut+"\n", map[string]string{"state": res.State, "signature": sigOut})
+		},
+	}
+	c.Flags().String("artifact", "", "artifact file to sign")
+	c.Flags().String("key", "", "cosign key reference (file path, k8s:// or KMS URI)")
+	c.Flags().String("output-signature", "", "signature output path")
+	c.Flags().String("output-bundle", "", "rekor bundle output path (optional, preserves transparency evidence)")
+	c.Flags().String("cosign-bin", "", "cosign executable (default: PATH lookup)")
+	return c
+}
+
+func newCosignVerifyCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "cosign-verify --artifact FILE --key PUB --signature SIG",
+		Short: "Verify a blob signature with the real cosign CLI (exit 0 valid, 1 invalid)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			artifact, _ := cmd.Flags().GetString("artifact")
+			keyRef, _ := cmd.Flags().GetString("key")
+			sigPath, _ := cmd.Flags().GetString("signature")
+			bundlePath, _ := cmd.Flags().GetString("bundle")
+			bin, _ := cmd.Flags().GetString("cosign-bin")
+			if artifact == "" || keyRef == "" || sigPath == "" {
+				emitErr(cmd, "--artifact, --key and --signature are required")
+				return &exitErr{code: exitcodes.InvalidInput}
+			}
+			p := qcosign.DefaultProvider()
+			if bin != "" {
+				p.Bin = bin
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+			defer cancel()
+			res := p.VerifyBlob(ctx, keyRef, artifact, sigPath, bundlePath)
+			if res.State != qcosign.StateVerified {
+				emitErr(cmd, res.Detail)
+				return &exitErr{code: cosignExit(res.State)}
+			}
+			return emit(cmd, "cosign: signature verified\n", map[string]string{"state": res.State})
+		},
+	}
+	c.Flags().String("artifact", "", "artifact file to verify")
+	c.Flags().String("key", "", "trusted cosign public key / key reference")
+	c.Flags().String("signature", "", "signature file")
+	c.Flags().String("bundle", "", "rekor bundle file (optional, checks transparency inclusion)")
+	c.Flags().String("cosign-bin", "", "cosign executable (default: PATH lookup)")
+	return c
+}
+
+func newRekorGetCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "rekor-get --uuid ENTRY_UUID",
+		Short: "Fetch a Rekor transparency entry by UUID (read-only, no credentials)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			uuid, _ := cmd.Flags().GetString("uuid")
+			base, _ := cmd.Flags().GetString("rekor-url")
+			if uuid == "" {
+				emitErr(cmd, "--uuid is required")
+				return &exitErr{code: exitcodes.InvalidInput}
+			}
+			r := qcosign.DefaultRekor()
+			if base != "" {
+				r.BaseURL = base
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			body, err := r.Entry(ctx, uuid)
+			if err != nil {
+				msg := err.Error()
+				code := exitcodes.Operational
+				if len(msg) >= 9 && msg[:9] == "NOT_FOUND" {
+					code = exitcodes.Rejected
+				} else if len(msg) >= 13 && msg[:13] == "INVALID_INPUT" {
+					code = exitcodes.InvalidInput
+				}
+				emitErr(cmd, msg)
+				return &exitErr{code: code}
+			}
+			var v any
+			_ = json.Unmarshal(body, &v)
+			return emit(cmd, string(body)+"\n", v)
+		},
+	}
+	c.Flags().String("uuid", "", "rekor entry UUID")
+	c.Flags().String("rekor-url", "", "rekor base URL (default: https://rekor.sigstore.dev)")
+	return c
 }

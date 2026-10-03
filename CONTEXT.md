@@ -37,7 +37,11 @@
    `absl-py 2.0.0`). Fixture mode stays default for deterministic CI.
 3. **Sigstore/Cosign** — DONE (Slice): local ECDSA-P256 DSSE signing/verification,
    provenance statement, identity/builder policy checks, dev transparency log,
-   `quorum attest` CLI + API metadata; real Cosign/Rekor adapter still future.
+   `quorum attest` CLI + API metadata; **plus live adapter**: `services/cosign`
+   shells the real CLI (`sign-blob`/`verify-blob`, explicit keys, bundle-preserving)
+   and `RekorClient` reads the public-good log (`PublicKey`/`Entry(uuid)`);
+   `attest cosign-sign|cosign-verify|rekor-get` wired with exit contract 0/1/4/5;
+   deterministic stub+httptest suite, live paths env-gated (`QUORUM_LIVE_COSIGN=1`).
 4. **Web dashboard** — Next.js: releases/builders/policy/audit/evidence pages + Playwright suite.
 5. **Object storage wiring** — DONE: content-addressed filesystem backend mounted
    into the API (`POST /evidence` base64 upload, metadata rows in Postgres,

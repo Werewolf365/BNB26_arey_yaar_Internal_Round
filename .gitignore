@@ -12,5 +12,7 @@ quorum-worker
 quorum-worker.exe
 contracts/out/
 contracts/cache/
+**/.next/
+**/tsconfig.tsbuildinfo
 builders.json
 quorum.yaml

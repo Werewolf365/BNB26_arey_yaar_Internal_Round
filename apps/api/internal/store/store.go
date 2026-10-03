@@ -106,4 +106,31 @@ type Store interface {
 
 	PutEvidence(ctx context.Context, e EvidenceObject) (EvidenceObject, error)
 	GetEvidence(ctx context.Context, id string) (EvidenceObject, error)
+
+	// Build-job queue (orchestrator + workers).
+	EnqueueJobs(ctx context.Context, verificationID string, builderIDs []string) ([]BuildJob, error)
+	ListJobs(ctx context.Context, verificationID string) ([]BuildJob, error)
+	GetJob(ctx context.Context, id string) (BuildJob, error)
+	// ClaimJob atomically moves one QUEUED job (or an expired lease) to CLAIMED.
+	ClaimJob(ctx context.Context, owner string, lease time.Duration) (BuildJob, bool, error)
+	CompleteJob(ctx context.Context, id string, ok bool, digest, commit, errCode, errDetail string) (BuildJob, error)
+}
+
+// BuildJob statuses: QUEUED -> CLAIMED -> RUNNING -> SUCCEEDED | FAILED.
+// A job whose lease expired is claimable again (attempts incremented).
+type BuildJob struct {
+	ID              string    `json:"id"`
+	VerificationID  string    `json:"verificationId"`
+	BuilderID       string    `json:"builderId"`
+	Status          string    `json:"status"`
+	Attempts        int       `json:"attempts"`
+	MaxAttempts     int       `json:"maxAttempts"`
+	ResultDigest    string    `json:"resultDigest"`
+	ResultCommit    string    `json:"resultCommit"`
+	ErrorCode       string    `json:"errorCode"`
+	ErrorDetail     string    `json:"errorDetail"`
+	LeaseOwner      string    `json:"leaseOwner"`
+	LeaseExpiresAt  time.Time `json:"leaseExpiresAt,omitempty"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 }

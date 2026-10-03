@@ -38,6 +38,9 @@ build-cli:
 build-api:
 	go build -o quorum-api ./apps/api
 
+build-worker:
+	go build -o quorum-worker ./apps/worker
+
 run-api:
 	QUORUM_ADDR=:8080 QUORUM_DATABASE_URL=postgres://quorum:quorum@localhost:5433/quorum?sslmode=disable ./quorum-api
 

@@ -23,6 +23,7 @@ type MemoryStore struct {
 	audit    []AuditRecord
 	anchors  map[string]Anchor
 	evidence map[string]EvidenceObject
+	jobs     map[string]BuildJob
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -35,6 +36,7 @@ func NewMemoryStore() *MemoryStore {
 		policies: map[string]PolicyRecord{},
 		anchors:  map[string]Anchor{},
 		evidence: map[string]EvidenceObject{},
+		jobs:     map[string]BuildJob{},
 	}
 }
 
@@ -270,4 +272,111 @@ func (m *MemoryStore) GetEvidence(ctx context.Context, id string) (EvidenceObjec
 		return EvidenceObject{}, fmt.Errorf("EVIDENCE_NOT_FOUND: %s", id)
 	}
 	return e, nil
+}
+
+func (m *MemoryStore) EnqueueJobs(ctx context.Context, verificationID string, builderIDs []string) ([]BuildJob, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.verifs[verificationID]; !ok {
+		return nil, fmt.Errorf("VERIFICATION_NOT_FOUND: %s", verificationID)
+	}
+	out := make([]BuildJob, 0, len(builderIDs))
+	for _, b := range builderIDs {
+		dup := false
+		for _, j := range m.jobs {
+			if j.VerificationID == verificationID && j.BuilderID == b {
+				out = append(out, j)
+				dup = true
+				break
+			}
+		}
+		if dup {
+			continue
+		}
+		now := time.Now().UTC()
+		j := BuildJob{ID: newID("job"), VerificationID: verificationID, BuilderID: b, Status: "QUEUED", MaxAttempts: 3, CreatedAt: now, UpdatedAt: now}
+		m.jobs[j.ID] = j
+		out = append(out, j)
+	}
+	return out, nil
+}
+
+func (m *MemoryStore) ListJobs(ctx context.Context, verificationID string) ([]BuildJob, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []BuildJob{}
+	for _, j := range m.jobs {
+		if verificationID == "" || j.VerificationID == verificationID {
+			out = append(out, j)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (m *MemoryStore) GetJob(ctx context.Context, id string) (BuildJob, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j, ok := m.jobs[id]
+	if !ok {
+		return BuildJob{}, fmt.Errorf("JOB_NOT_FOUND: %s", id)
+	}
+	return j, nil
+}
+
+func (m *MemoryStore) ClaimJob(ctx context.Context, owner string, lease time.Duration) (BuildJob, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if owner == "" {
+		return BuildJob{}, false, fmt.Errorf("INVALID_INPUT: lease owner required")
+	}
+	now := time.Now().UTC()
+	var best *BuildJob
+	for _, j := range m.jobs {
+		if j.Status == "QUEUED" || ((j.Status == "CLAIMED" || j.Status == "RUNNING") && !j.LeaseExpiresAt.After(now)) {
+			c := j
+			if best == nil || c.CreatedAt.Before(best.CreatedAt) {
+				best = &c
+			}
+		}
+	}
+	if best == nil {
+		return BuildJob{}, false, nil
+	}
+	best.Status = "CLAIMED"
+	best.Attempts++
+	best.LeaseOwner = owner
+	best.LeaseExpiresAt = now.Add(lease)
+	best.UpdatedAt = now
+	m.jobs[best.ID] = *best
+	return *best, true, nil
+}
+
+func (m *MemoryStore) CompleteJob(ctx context.Context, id string, ok bool, digest, commit, errCode, errDetail string) (BuildJob, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j, found := m.jobs[id]
+	if !found {
+		return BuildJob{}, fmt.Errorf("JOB_NOT_FOUND: %s", id)
+	}
+	if j.Status == "SUCCEEDED" || j.Status == "FAILED" {
+		return BuildJob{}, fmt.Errorf("JOB_CONFLICT: %s already terminal (%s)", id, j.Status)
+	}
+	if ok {
+		j.Status = "SUCCEEDED"
+		j.ResultDigest = digest
+		j.ResultCommit = commit
+	} else if j.Attempts >= j.MaxAttempts {
+		j.Status = "FAILED"
+		j.ErrorCode = errCode
+		j.ErrorDetail = errDetail
+	} else {
+		j.Status = "QUEUED" // retry: lease released, attempts kept
+		j.ErrorCode = errCode
+		j.ErrorDetail = errDetail
+	}
+	j.LeaseOwner = ""
+	j.UpdatedAt = time.Now().UTC()
+	m.jobs[id] = j
+	return j, nil
 }

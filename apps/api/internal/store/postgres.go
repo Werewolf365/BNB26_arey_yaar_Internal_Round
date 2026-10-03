@@ -2,7 +2,7 @@ package store
 
 import (
 	"context"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -10,11 +10,14 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-//go:embed migrations/0001_init.sql
-var initSQL string
+//go:embed migrations/*.sql
+var migrationsFS embed.FS
+
+var migrationOrder = []string{"0001_init.sql", "0002_jobs.sql"}
 
 // Postgres is the production Store.
 type Postgres struct {
@@ -39,7 +42,7 @@ func (p *Postgres) Ping(ctx context.Context) error {
 
 func (p *Postgres) Close() { p.pool.Close() }
 
-// Migrate applies the initial schema idempotently.
+// Migrate applies pending migrations in order, idempotently.
 func (p *Postgres) Migrate(ctx context.Context) error {
 	if _, err := p.pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		version TEXT PRIMARY KEY,
@@ -47,22 +50,36 @@ func (p *Postgres) Migrate(ctx context.Context) error {
 	)`); err != nil {
 		return fmt.Errorf("OPERATIONAL: cannot init migration tracking: %v", err)
 	}
-	var applied bool
-	if err := p.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version='0001_init')`).Scan(&applied); err != nil {
-		return err
+	for _, name := range migrationOrder {
+		version := strings.TrimSuffix(name, ".sql")
+		var applied bool
+		if err := p.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, version).Scan(&applied); err != nil {
+			return err
+		}
+		if applied {
+			continue
+		}
+		raw, err := migrationsFS.ReadFile("migrations/" + name)
+		if err != nil {
+			return fmt.Errorf("OPERATIONAL: missing embedded migration %s: %v", name, err)
+		}
+		if err := p.applyMigration(ctx, version, string(raw)); err != nil {
+			return err
+		}
 	}
-	if applied {
-		return nil
-	}
+	return nil
+}
+
+func (p *Postgres) applyMigration(ctx context.Context, version, sql string) error {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, initSQL); err != nil {
-		return fmt.Errorf("OPERATIONAL: migration failed: %v", err)
+	if _, err := tx.Exec(ctx, sql); err != nil {
+		return fmt.Errorf("OPERATIONAL: migration %s failed: %v", version, err)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations(version) VALUES ('0001_init') ON CONFLICT DO NOTHING`); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations(version) VALUES ($1) ON CONFLICT DO NOTHING`, version); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -382,4 +399,149 @@ func (p *Postgres) GetEvidence(ctx context.Context, id string) (EvidenceObject, 
 	err := p.pool.QueryRow(ctx, `SELECT id, verification_id, kind, storage_key, sha256 FROM evidence_objects WHERE id=$1`, id).
 		Scan(&e.ID, &e.VerificationID, &e.Kind, &e.StorageKey, &e.SHA256)
 	return e, notFoundError(err, "EVIDENCE_NOT_FOUND", id)
+}
+
+func scanJob(row pgx.Row) (BuildJob, error) {
+	var j BuildJob
+	var lease pgtype.Timestamptz
+	err := row.Scan(&j.ID, &j.VerificationID, &j.BuilderID, &j.Status, &j.Attempts, &j.MaxAttempts,
+		&j.ResultDigest, &j.ResultCommit, &j.ErrorCode, &j.ErrorDetail, &j.LeaseOwner, &lease,
+		&j.CreatedAt, &j.UpdatedAt)
+	if err != nil {
+		return j, err
+	}
+	// NULL lease (never claimed) reads as zero time, which is expired by
+	// definition — the job is claimable. No special-casing needed.
+	if lease.Valid {
+		j.LeaseExpiresAt = lease.Time
+	}
+	return j, nil
+}
+
+const jobColumns = `id, verification_id, builder_id, status, attempts, max_attempts, result_digest, result_commit, error_code, error_detail, lease_owner, lease_expires_at, created_at, updated_at`
+
+func (p *Postgres) EnqueueJobs(ctx context.Context, verificationID string, builderIDs []string) ([]BuildJob, error) {
+	var exists bool
+	if err := p.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM verifications WHERE id=$1)`, verificationID).Scan(&exists); err != nil || !exists {
+		if err == nil {
+			return nil, fmt.Errorf("VERIFICATION_NOT_FOUND: %s", verificationID)
+		}
+		return nil, err
+	}
+	out := make([]BuildJob, 0, len(builderIDs))
+	for _, b := range builderIDs {
+		if b == "" {
+			return nil, fmt.Errorf("INVALID_INPUT: builder id required")
+		}
+		id := newID("job")
+		_, err := p.pool.Exec(ctx, `INSERT INTO build_jobs(id, verification_id, builder_id) VALUES ($1,$2,$3) ON CONFLICT (verification_id, builder_id) DO NOTHING`, id, verificationID, b)
+		if err != nil {
+			return nil, err
+		}
+		j, err := scanJob(p.pool.QueryRow(ctx, `SELECT `+jobColumns+` FROM build_jobs WHERE verification_id=$1 AND builder_id=$2`, verificationID, b))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, nil
+}
+
+func (p *Postgres) ListJobs(ctx context.Context, verificationID string) ([]BuildJob, error) {
+	q := `SELECT ` + jobColumns + ` FROM build_jobs ORDER BY created_at`
+	args := []any{}
+	if verificationID != "" {
+		q = `SELECT ` + jobColumns + ` FROM build_jobs WHERE verification_id=$1 ORDER BY created_at`
+		args = append(args, verificationID)
+	}
+	rows, err := p.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []BuildJob{}
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, nil
+}
+
+func (p *Postgres) GetJob(ctx context.Context, id string) (BuildJob, error) {
+	j, err := scanJob(p.pool.QueryRow(ctx, `SELECT `+jobColumns+` FROM build_jobs WHERE id=$1`, id))
+	return j, notFoundError(err, "JOB_NOT_FOUND", id)
+}
+
+func (p *Postgres) ClaimJob(ctx context.Context, owner string, lease time.Duration) (BuildJob, bool, error) {
+	if owner == "" {
+		return BuildJob{}, false, fmt.Errorf("INVALID_INPUT: lease owner required")
+	}
+	secs := int(lease.Seconds())
+	if secs < 1 {
+		secs = 60
+	}
+	var j BuildJob
+	err := p.pool.QueryRow(ctx, `
+		UPDATE build_jobs SET status='CLAIMED', lease_owner=$1,
+			lease_expires_at=now()+make_interval(secs=>$2),
+			attempts=attempts+1, updated_at=now()
+		WHERE id = (
+			SELECT id FROM build_jobs
+			WHERE status='QUEUED'
+			   OR (status IN ('CLAIMED','RUNNING') AND lease_expires_at < now())
+			ORDER BY created_at LIMIT 1
+			FOR UPDATE SKIP LOCKED
+		)
+		RETURNING `+jobColumns, owner, secs).Scan(
+		&j.ID, &j.VerificationID, &j.BuilderID, &j.Status, &j.Attempts, &j.MaxAttempts,
+		&j.ResultDigest, &j.ResultCommit, &j.ErrorCode, &j.ErrorDetail, &j.LeaseOwner,
+		&j.LeaseExpiresAt, &j.CreatedAt, &j.UpdatedAt)
+	if err == pgx.ErrNoRows {
+		return BuildJob{}, false, nil
+	}
+	if err != nil {
+		return BuildJob{}, false, err
+	}
+	return j, true, nil
+}
+
+func (p *Postgres) CompleteJob(ctx context.Context, id string, ok bool, digest, commit, errCode, errDetail string) (BuildJob, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return BuildJob{}, err
+	}
+	defer tx.Rollback(ctx)
+	var j BuildJob
+	err = tx.QueryRow(ctx, `SELECT `+jobColumns+` FROM build_jobs WHERE id=$1 FOR UPDATE`, id).Scan(
+		&j.ID, &j.VerificationID, &j.BuilderID, &j.Status, &j.Attempts, &j.MaxAttempts,
+		&j.ResultDigest, &j.ResultCommit, &j.ErrorCode, &j.ErrorDetail, &j.LeaseOwner,
+		&j.LeaseExpiresAt, &j.CreatedAt, &j.UpdatedAt)
+	if err == pgx.ErrNoRows {
+		return BuildJob{}, fmt.Errorf("JOB_NOT_FOUND: %s", id)
+	}
+	if err != nil {
+		return BuildJob{}, err
+	}
+	if j.Status == "SUCCEEDED" || j.Status == "FAILED" {
+		return BuildJob{}, fmt.Errorf("JOB_CONFLICT: %s already terminal (%s)", id, j.Status)
+	}
+	next := "QUEUED"
+	if ok {
+		next = "SUCCEEDED"
+	} else if j.Attempts >= j.MaxAttempts {
+		next = "FAILED"
+	}
+	_, err = tx.Exec(ctx, `UPDATE build_jobs SET status=$1, result_digest=$2, result_commit=$3,
+		error_code=$4, error_detail=$5, lease_owner='', updated_at=now() WHERE id=$6`,
+		next, digest, commit, errCode, errDetail, id)
+	if err != nil {
+		return BuildJob{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return BuildJob{}, err
+	}
+	return p.GetJob(ctx, id)
 }

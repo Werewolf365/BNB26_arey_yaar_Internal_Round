@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -25,6 +26,7 @@ func TestPostgresIntegration(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	uniq := fmt.Sprintf("%d", time.Now().UnixNano())
 	pg, err := store.Connect(ctx, dsn)
 	if err != nil {
 		t.Skipf("postgres unreachable: %v", err)
@@ -40,11 +42,11 @@ func TestPostgresIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rel, dup, err := pg.CreateRelease(ctx, store.Release{Package: "p", Repo: "https://github.com/e/t", Commit: "abc123"}, "pg-key-1")
+	rel, dup, err := pg.CreateRelease(ctx, store.Release{Package: "p", Repo: "https://github.com/e/t", Commit: "abc123"}, "pg-key-1-"+uniq)
 	if err != nil || dup {
 		t.Fatalf("create: %v %v", err, dup)
 	}
-	again, dup, err := pg.CreateRelease(ctx, store.Release{Package: "p", Repo: "https://github.com/e/t", Commit: "abc123"}, "pg-key-1")
+	again, dup, err := pg.CreateRelease(ctx, store.Release{Package: "p", Repo: "https://github.com/e/t", Commit: "abc123"}, "pg-key-1-"+uniq)
 	if err != nil || !dup || again.ID != rel.ID {
 		t.Fatalf("idempotent replay: %v %v", err, dup)
 	}
@@ -57,14 +59,14 @@ func TestPostgresIntegration(t *testing.T) {
 		{BuilderID: "b", IndependenceGroup: "g2", SourceCommit: "abc123", ArtifactDigest: d, SignatureValid: true, VerificationSource: "builder"},
 	}
 	res := policy.Evaluate(policy.Policy{PolicyID: "p", Version: "v1", MinBuilders: 1, RequiredAgreement: 1, RequiredIndependentGroups: 1, ConflictTolerance: 1}, "abc123", ev)
-	ver, dup, err := pg.CreateVerification(ctx, store.Verification{ReleaseID: rel.ID, PolicyID: "p", Decision: res.Decision, Required: res.Required, Satisfied: res.Satisfied, Result: res, Evidence: ev, ExpectedSrc: "abc123"}, "pg-vkey-1")
+	ver, dup, err := pg.CreateVerification(ctx, store.Verification{ReleaseID: rel.ID, PolicyID: "p", Decision: res.Decision, Required: res.Required, Satisfied: res.Satisfied, Result: res, Evidence: ev, ExpectedSrc: "abc123"}, "pg-vkey-1-"+uniq)
 	if err != nil || dup || ver.Decision == "" {
 		t.Fatalf("create verification: %v", err)
 	}
 	if _, _, err := pg.CreateVerification(ctx, store.Verification{ReleaseID: "rel_missing"}, "pg-vkey-2"); err == nil {
 		t.Fatal("verification for missing release must fail (FK)")
 	}
-	if _, err := pg.UpsertBuilder(ctx, store.Builder{ID: "builder-a", IndependenceGroup: "cloud-a"}); err != nil {
+	if _, err := pg.UpsertBuilder(ctx, store.Builder{ID: "pg-builder-a-" + uniq, IndependenceGroup: "cloud-a"}); err != nil {
 		t.Fatal(err)
 	}
 	bs, err := pg.ListBuilders(ctx)
@@ -72,13 +74,13 @@ func TestPostgresIntegration(t *testing.T) {
 		t.Fatal("list builders")
 	}
 	off := false
-	if _, err := pg.PatchBuilder(ctx, "builder-a", &off); err != nil {
+	if _, err := pg.PatchBuilder(ctx, "pg-builder-a-" + uniq, &off); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pg.CreatePolicy(ctx, store.PolicyRecord{ID: "policy-a", Version: "v1", Body: resPolicy(), PolicyHash: "sha256:x"}); err != nil {
+	if _, err := pg.CreatePolicy(ctx, store.PolicyRecord{ID: "pg-policy-a-" + uniq, Version: "v1", Body: resPolicy(), PolicyHash: "sha256:x"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pg.CreatePolicy(ctx, store.PolicyRecord{ID: "policy-a", Version: "v1", Body: resPolicy(), PolicyHash: "sha256:x"}); err == nil {
+	if _, err := pg.CreatePolicy(ctx, store.PolicyRecord{ID: "pg-policy-a-" + uniq, Version: "v1", Body: resPolicy(), PolicyHash: "sha256:x"}); err == nil {
 		t.Fatal("duplicate policy must fail (unique)")
 	}
 	if _, err := pg.AppendAudit(ctx, "test.event", map[string]any{"k": "v"}, ver.ID); err != nil {
@@ -106,6 +108,51 @@ func TestPostgresIntegration(t *testing.T) {
 	}
 	if _, err := pg.GetEvidence(ctx, eo.ID); err != nil {
 		t.Fatal(err)
+	}
+
+	// Job queue: enqueue (idempotent), claim, complete, lease expiry.
+	if _, err := pg.UpsertBuilder(ctx, store.Builder{ID: "pg-builder-a-" + uniq, IndependenceGroup: "cloud-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pg.UpsertBuilder(ctx, store.Builder{ID: "pg-builder-b-" + uniq, IndependenceGroup: "cloud-b"}); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := pg.EnqueueJobs(ctx, ver.ID, []string{"pg-builder-a-" + uniq, "pg-builder-b-" + uniq})
+	if err != nil || len(jobs) != 2 {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if _, err := pg.EnqueueJobs(ctx, "ver_missing", []string{"pg-builder-a-" + uniq}); err == nil {
+		t.Fatal("enqueue for missing verification must fail")
+	}
+	requeued, err := pg.EnqueueJobs(ctx, ver.ID, []string{"pg-builder-a-" + uniq})
+	if err != nil || len(requeued) != 1 || requeued[0].ID != jobs[0].ID {
+		t.Fatal("re-enqueue must converge")
+	}
+	j1, claimed, err := pg.ClaimJob(ctx, "worker-1", time.Second)
+	if err != nil || !claimed || j1.Attempts != 1 {
+		t.Fatalf("claim: %v %v", err, claimed)
+	}
+	if _, claimed, err := pg.ClaimJob(ctx, "worker-2", time.Minute); err != nil || !claimed {
+		t.Fatalf("second claim takes the other job: %v", err)
+	}
+	if _, claimed, _ := pg.ClaimJob(ctx, "worker-3", time.Minute); claimed {
+		t.Fatal("drained queue must not claim")
+	}
+	// Expire worker-1's lease by waiting, then reclaim.
+	time.Sleep(1100 * time.Millisecond)
+	j1b, claimed, err := pg.ClaimJob(ctx, "worker-3", time.Minute)
+	if err != nil || !claimed || j1b.ID != j1.ID || j1b.Attempts != 2 {
+		t.Fatalf("expired lease must be reclaimable: %v %v", err, claimed)
+	}
+	done, err := pg.CompleteJob(ctx, j1b.ID, true, "sha256:abc", "abc123", "", "")
+	if err != nil || done.Status != "SUCCEEDED" {
+		t.Fatalf("complete: %v", err)
+	}
+	if _, err := pg.CompleteJob(ctx, j1b.ID, true, "sha256:abc", "abc123", "", ""); err == nil {
+		t.Fatal("terminal job must reject recomplete")
+	}
+	if _, _, err := pg.ClaimJob(ctx, "", time.Minute); err == nil {
+		t.Fatal("claim without owner must fail")
 	}
 }
 

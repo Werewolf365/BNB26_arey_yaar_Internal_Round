@@ -63,7 +63,18 @@ cross-OS nondeterminism). CLI: real file `VERIFIED` (0), +1 byte `REJECTED`
 API: host-vs-container evidence → `INVESTIGATE` with minority surfaced;
 agreeing evidence → `VERIFIED`. Full detail: `docs/demo.md`.
 
-## 7. Gates and suites intentionally separate
+## 7. Builder workers end-to-end (live, `golang/example@7f05d21`)
+
+API on Postgres + `quorum-worker --once` ×2 (owners worker-1/2): claim →
+fetch pinned commit → network-none sandbox archive → complete. Both workers
+reported identical `sha256:39193228…`; API auto-evaluated `VERIFIED`
+(`fromJobs:true`) with full audit trail (register → release → evaluated →
+enqueued → completed ×2 → evaluated). Failure path tested (3× fail →
+`FAILED` terminal, insufficient evaluation). Cross-toolchain archive drift
+(host git 2.51 vs container 2.39.5) proven and documented — comparability
+requires homogeneous builder images.
+
+## 8. Gates and suites intentionally separate
 
 `make test-all` = deterministic only. Live externals (real OSS Rebuild/ADC,
 testnets) live in `make test-external` and never gate CI. CI runs unit +

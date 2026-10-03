@@ -31,7 +31,15 @@ GET    /api/v1/releases/:id
 POST   /api/v1/verifications                 # runs the pipeline (same runner semantics as CLI)
 GET    /api/v1/verifications/:id
 POST   /api/v1/verifications/:id/reverify
+POST   /api/v1/verifications/:id/jobs      # enqueue builder rebuild jobs
+GET    /api/v1/verifications/:id/jobs
 
+POST   /api/v1/jobs/claim                  # workers poll: {owner, leaseSeconds}
+GET    /api/v1/jobs/:id
+POST   /api/v1/jobs/:id/complete           # {ok, digest, commit, errorCode, errorDetail};
+                                           # when all siblings terminal, auto-evaluates quorum
+
+POST   /api/v1/evidence                    # submit evidence objects
 GET    /api/v1/evidence/:id
 GET    /api/v1/attestations/:id
 
@@ -66,3 +74,8 @@ GET    /api/v1/ready                         # 200 only when DB reachable
 - Persistence: PostgreSQL (migrations in `apps/api/migrations/`), large blobs
   (attestations, bundles, logs) in object storage under `sha256/<digest>`.
 - Decisions reuse `services/policy` (single engine — no reimplementation).
+- Empty evidence on verification create records `INSUFFICIENT_EVIDENCE`
+  (orchestrator pending state for job-driven flows), not a 422.
+- Build jobs: `QUEUED → CLAIMED → SUCCEEDED|FAILED`, leases with `SKIP LOCKED`
+  claiming, retries to `maxAttempts`, terminal duplicates rejected; enqueue
+  requires registered builders; completion triggers quorum auto-evaluation.

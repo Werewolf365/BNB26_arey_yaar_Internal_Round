@@ -8,6 +8,8 @@ quorum
 quorum.exe
 quorum-api
 quorum-api.exe
+quorum-worker
+quorum-worker.exe
 contracts/out/
 contracts/cache/
 builders.json

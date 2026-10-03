@@ -29,7 +29,9 @@
 
 ## To achieve (ordered)
 
-1. **Builder workers** — orchestrator + queue, real rebuild jobs end-to-end via API.
+1. **Builder workers** — DONE: orchestrator queue + `quorum-worker`, real rebuild
+   jobs end-to-end via API (live VERIFIED on `golang/example`). Remote/fleet
+   builders remain future work.
 2. **OSS Rebuild live path** — real CLI integration (`test-external`), supported-package demo.
 3. **Sigstore/Cosign** — replace test keys; transparency + identity checks.
 4. **Web dashboard** — Next.js: releases/builders/policy/audit/evidence pages + Playwright suite.

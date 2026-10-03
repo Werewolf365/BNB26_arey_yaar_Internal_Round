@@ -57,6 +57,14 @@ func New(st store.Store) *Server {
 
 	s.mux.HandleFunc("POST /api/v1/blockchain/anchor", s.handleAnchor)
 	s.mux.HandleFunc("GET /api/v1/blockchain/{verificationId}", s.handleGetAnchor)
+
+	s.mux.HandleFunc("POST /api/v1/verifications/{id}/jobs", s.handleEnqueueJobs)
+	s.mux.HandleFunc("GET /api/v1/verifications/{id}/jobs", s.handleListJobs)
+	s.mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleGetJob)
+	s.mux.HandleFunc("POST /api/v1/jobs/claim", s.handleClaimJob)
+	s.mux.HandleFunc("POST /api/v1/jobs/{id}/complete", s.handleCompleteJob)
+
+	s.mux.HandleFunc("POST /api/v1/evidence", s.handlePutEvidence)
 	return s
 }
 
@@ -305,8 +313,9 @@ func (s *Server) handleCreateVerification(w http.ResponseWriter, r *http.Request
 		policyID = rec.ID
 	}
 	if len(in.Evidence) == 0 {
-		writeErr(w, r, fmt.Errorf("INSUFFICIENT_EVIDENCE: at least one evidence entry is required"))
-		return
+		// Empty evidence is a valid orchestrator state (jobs pending): the
+		// engine itself returns INSUFFICIENT_EVIDENCE, which is recorded.
+		in.Evidence = []policy.Evidence{}
 	}
 	res := policy.Evaluate(pol, rel.Commit, in.Evidence)
 	ver, dup, err := s.store.CreateVerification(r.Context(), store.Verification{
@@ -373,7 +382,207 @@ func (s *Server) handleReverify(w http.ResponseWriter, r *http.Request) {
 // when it resolves, else the default (reverify never invents policy).
 func policyFromResult(v store.Verification) policy.Policy { return runner.DefaultPolicy() }
 
-// --- evidence / attestations ---
+// --- build jobs (orchestrator) ---
+
+func (s *Server) handleEnqueueJobs(w http.ResponseWriter, r *http.Request) {
+	vid := r.PathValue("id")
+	if _, err := s.store.GetVerification(r.Context(), vid); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	var in struct {
+		BuilderIDs []string `json:"builderIds"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	if len(in.BuilderIDs) == 0 {
+		writeErr(w, r, fmt.Errorf("INVALID_INPUT: builderIds must not be empty"))
+		return
+	}
+	known, err := s.store.ListBuilders(r.Context())
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	knownSet := map[string]bool{}
+	for _, b := range known {
+		knownSet[b.ID] = true
+	}
+	for _, id := range in.BuilderIDs {
+		if !knownSet[id] {
+			writeErr(w, r, fmt.Errorf("BUILDER_NOT_FOUND: %s (register it first)", id))
+			return
+		}
+	}
+	jobs, err := s.store.EnqueueJobs(r.Context(), vid, in.BuilderIDs)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	if _, aerr := s.store.AppendAudit(r.Context(), "jobs.enqueued", map[string]any{"verificationId": vid, "builders": in.BuilderIDs}, vid); aerr != nil {
+		writeErr(w, r, aerr)
+		return
+	}
+	writeJSON(w, r, 201, jobs)
+}
+
+func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
+	jobs, err := s.store.ListJobs(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	writeJSON(w, r, 200, jobs)
+}
+
+func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
+	j, err := s.store.GetJob(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	writeJSON(w, r, 200, j)
+}
+
+func (s *Server) handleClaimJob(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Owner        string `json:"owner"`
+		LeaseSeconds int    `json:"leaseSeconds"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	lease := time.Duration(in.LeaseSeconds) * time.Second
+	if lease <= 0 {
+		lease = 5 * time.Minute
+	}
+	j, claimed, err := s.store.ClaimJob(r.Context(), in.Owner, lease)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	if !claimed {
+		writeJSON(w, r, 200, map[string]any{"claimed": false})
+		return
+	}
+	writeJSON(w, r, 200, map[string]any{"claimed": true, "job": j})
+}
+
+func (s *Server) handleCompleteJob(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		OK         bool   `json:"ok"`
+		Digest     string `json:"digest"`
+		Commit     string `json:"commit"`
+		ErrorCode  string `json:"errorCode"`
+		ErrorDetail string `json:"errorDetail"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	j, err := s.store.CompleteJob(r.Context(), r.PathValue("id"), in.OK, in.Digest, in.Commit, in.ErrorCode, in.ErrorDetail)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	if _, aerr := s.store.AppendAudit(r.Context(), "job.completed", map[string]any{"jobId": j.ID, "builderId": j.BuilderID, "ok": in.OK}, j.VerificationID); aerr != nil {
+		writeErr(w, r, aerr)
+		return
+	}
+	// Auto-evaluate when every sibling job is terminal: succeeded digests
+	// become evidence (groups resolved from the registry), failures are
+	// recorded as reasons — never silently dropped.
+	siblings, err := s.store.ListJobs(r.Context(), j.VerificationID)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	pending := false
+	for _, sib := range siblings {
+		if sib.Status != "SUCCEEDED" && sib.Status != "FAILED" {
+			pending = true
+		}
+	}
+	if pending {
+		writeJSON(w, r, 200, map[string]any{"job": j, "evaluation": "pending"})
+		return
+	}
+	ver, err := s.store.GetVerification(r.Context(), j.VerificationID)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	rel, err := s.store.GetRelease(r.Context(), ver.ReleaseID)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	builders, err := s.store.ListBuilders(r.Context())
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	groups := map[string]string{}
+	for _, b := range builders {
+		groups[b.ID] = b.IndependenceGroup
+	}
+	evidence := []policy.Evidence{}
+	var notes []string
+	for _, sib := range siblings {
+		if sib.Status == "SUCCEEDED" {
+			evidence = append(evidence, policy.Evidence{
+				BuilderID: sib.BuilderID, IndependenceGroup: groups[sib.BuilderID],
+				SourceCommit: sib.ResultCommit, ArtifactDigest: sib.ResultDigest,
+				SignatureValid: true, VerificationSource: "builder",
+			})
+		} else {
+			notes = append(notes, fmt.Sprintf("builder %s failed: %s", sib.BuilderID, sib.ErrorCode))
+		}
+	}
+	if len(evidence) == 0 {
+		writeJSON(w, r, 200, map[string]any{"job": j, "evaluation": "insufficient", "reasons": notes})
+		return
+	}
+	res := policy.Evaluate(runner.DefaultPolicy(), rel.Commit, evidence)
+	res.Reasons = append(res.Reasons, notes...)
+	nv, _, err := s.store.CreateVerification(r.Context(), store.Verification{
+		ReleaseID: rel.ID, PolicyID: "policy-a", Decision: res.Decision,
+		Required: res.Required, Satisfied: res.Satisfied,
+		Result: res, Evidence: evidence, ExpectedSrc: rel.Commit,
+	}, "")
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	if _, aerr := s.store.AppendAudit(r.Context(), "quorum.evaluated", map[string]any{"verificationId": nv.ID, "decision": res.Decision, "fromJobs": true}, nv.ID); aerr != nil {
+		writeErr(w, r, aerr)
+		return
+	}
+	writeJSON(w, r, 200, map[string]any{"job": j, "evaluation": nv})
+}
+
+// --- evidence submit ---
+
+func (s *Server) handlePutEvidence(w http.ResponseWriter, r *http.Request) {
+	var in store.EvidenceObject
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	if in.VerificationID == "" || in.Kind == "" || in.StorageKey == "" || in.SHA256 == "" {
+		writeErr(w, r, fmt.Errorf("INVALID_INPUT: verificationId, kind, storageKey and sha256 are required"))
+		return
+	}
+	e, err := s.store.PutEvidence(r.Context(), in)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	writeJSON(w, r, 201, e)
+}
 
 func (s *Server) handleGetEvidence(w http.ResponseWriter, r *http.Request) {
 	e, err := s.store.GetEvidence(r.Context(), r.PathValue("id"))

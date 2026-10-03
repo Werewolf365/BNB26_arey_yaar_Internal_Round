@@ -19,6 +19,15 @@ is **one** independent source, not three. Demo profiles: `builder-a/cloud-a`,
 - Builds run pinned-source → clean env → hash → compare; no secrets in build
   envs; network access only when declared.
 
+## Comparability requirement (proven live)
+
+`git archive` bytes for the same commit differ across git implementations
+(host 2.51 vs container 2.39.5 produced different digests in testing). Digests
+are therefore only comparable between builders running the **same toolchain
+image** — builder profiles pin the image digest, and provenance records the
+toolchain version. Cross-toolchain equality must never be assumed; the quorum
+engine treats such divergence as conflict evidence, which is correct behavior.
+
 ## Limitation (explicit)
 
 Separate containers on one host ≠ independent infrastructure. Real independence

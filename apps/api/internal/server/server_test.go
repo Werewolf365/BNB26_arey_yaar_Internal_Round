@@ -164,8 +164,8 @@ func TestVerifications(t *testing.T) {
 	if code, env := do(t, srv, "POST", "/api/v1/verifications", fmt.Sprintf(`{"releaseId":"rel_nope","evidence":%s}`, agreeEvidence()), nil); code != 404 {
 		t.Fatalf("unknown release: %d %v", code, env.Error)
 	}
-	// No evidence -> 422 typed.
-	if code, env := do(t, srv, "POST", "/api/v1/verifications", fmt.Sprintf(`{"releaseId":%q}`, rel), nil); code != 422 || env.Error.Code != "INSUFFICIENT_EVIDENCE" {
+	// Empty evidence records INSUFFICIENT_EVIDENCE (orchestrator pending state).
+	if code, env := do(t, srv, "POST", "/api/v1/verifications", fmt.Sprintf(`{"releaseId":%q}`, rel), nil); code != 201 || mustData[map[string]any](t, env)["decision"] != "INSUFFICIENT_EVIDENCE" {
 		t.Fatalf("empty evidence: %d %v", code, env.Error)
 	}
 	// Conflicting evidence -> recorded with visible minority (never hidden).

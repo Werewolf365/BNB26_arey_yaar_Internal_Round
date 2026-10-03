@@ -89,8 +89,13 @@ upstream exactly) → **4 independent groups agree**, exit 0; drift control case
 excludes the OSS row with "source commit mismatch". JSON-mode errors now emit
 `{"error":…}` envelopes on stderr (tested).
 
-## 9. Gates and suites intentionally separate
+## 10. Ten-target resilience battery (large-corpus proof)
 
-`make test-all` = deterministic only. Live externals (real OSS Rebuild/ADC,
+`docs/testing/TARGET-BATTERY.md` (auto-regenerable via
+`python scripts/target-battery.py`): every target was cloned, archived via
+`git archive`, passed through the CLI **verify / tamper / conflict** triple,
+and had a real OSS Rebuild Rebuild probe (`list` + first-version `get`).
+All 10 repos: VERIFIED / REJECTED-with-digest-mismatch / conflict minority
+surfaced. Test count, paths, commands, and sha prefixes are recorded there.`make test-all` = deterministic only. Live externals (real OSS Rebuild/ADC,
 testnets) live in `make test-external` and never gate CI. CI runs unit +
 `quorum verify`/`audit verify` smoke + a Postgres-service integration job.

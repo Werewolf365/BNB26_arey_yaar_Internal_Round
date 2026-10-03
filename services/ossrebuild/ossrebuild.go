@@ -21,12 +21,12 @@ import (
 
 // States (adapter contract; also mirrored in services/oss-rebuild/adapter.mjs).
 const (
-	StateVerified   = "SUPPORTED_AND_VERIFIED"
-	StateFailed     = "SUPPORTED_BUT_FAILED"
-	StateUnsupported = "UNSUPPORTED"
-	StateNotFound   = "NOT_FOUND"
-	StateUnavailable = "UNAVAILABLE"
-	StateMalformed  = "MALFORMED_EVIDENCE"
+	StateVerified    = "SUPPORTED_AND_VERIFIED"
+	StateFailed       = "SUPPORTED_BUT_FAILED"
+	StateUnsupported  = "UNSUPPORTED"
+	StateNotFound     = "NOT_FOUND"
+	StateUnavailable  = "UNAVAILABLE"
+	StateMalformed    = "MALFORMED_EVIDENCE"
 )
 
 // Result is the normalized lookup outcome. Raw holds the untouched CLI
@@ -113,7 +113,9 @@ func (p Provider) run(ctx context.Context, args ...string) (stdout, stderr strin
 		last = fmt.Errorf("%v: %s", err, strings.TrimSpace(stdout.String()+"\n"+stderr.String()))
 		time.Sleep(time.Duration(i+1) * time.Second)
 	}
-	return "", "", fmt.Errorf("UNAVAILABLE: %v", last)
+	// Raw error (no UNAVAILABLE prefix): only timeouts carry that taxonomy,
+	// so Lookup can still distinguish FAILED from UNAVAILABLE.
+	return "", "", last
 }
 
 // Probe checks the binary executes (exit 0 on --help).
@@ -142,7 +144,9 @@ func (p Provider) Lookup(ctx context.Context, pkgRef string) (Result, error) {
 		case strings.Contains(text, "file does not exist"):
 			res.State = StateNotFound
 			res.Detail = "no rebuild attestation for this version (package may exist, version not rebuilt)"
-		case strings.Contains(text, "deadline") || strings.Contains(text, "timeout") || strings.Contains(text, "UNAVAILABLE"):
+		case strings.Contains(text, "deadline") || strings.Contains(text, "timeout") ||
+			strings.Contains(text, "UNAVAILABLE") || strings.Contains(text, "executable file not found") ||
+			strings.Contains(text, "not found in %PATH%") || strings.Contains(text, "not found in $PATH"):
 			res.State = StateUnavailable
 			res.Detail = "oss-rebuild service unreachable: " + text
 		default:

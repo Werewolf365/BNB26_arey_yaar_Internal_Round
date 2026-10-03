@@ -35,15 +35,62 @@ func main() {
 	} else {
 		log.Printf("QUORUM_DATABASE_URL unset: using in-memory store (dev/test only)")
 	}
-	blobDir := os.Getenv("QUORUM_BLOB_DIR")
-	if blobDir == "" {
-		blobDir = "./data/evidence"
+	var blobs storage.Backend
+	if ep := os.Getenv("QUORUM_S3_ENDPOINT"); ep != "" {
+		bucket := os.Getenv("QUORUM_S3_BUCKET")
+		if bucket == "" {
+			bucket = "quorum-evidence"
+		}
+		region := os.Getenv("QUORUM_S3_REGION")
+		if region == "" {
+			region = "us-east-1"
+		}
+		access := os.Getenv("QUORUM_S3_ACCESS_KEY")
+		if access == "" {
+			access = "test"
+		}
+		secret := os.Getenv("QUORUM_S3_SECRET_KEY")
+		if secret == "" {
+			secret = "test"
+		}
+		pathStyle := true
+		if v := os.Getenv("QUORUM_S3_PATH_STYLE"); v == "false" || v == "0" {
+			pathStyle = false
+		}
+		s3blobs, err := storage.NewS3(storage.S3Config{
+			Endpoint: ep, Bucket: bucket, Region: region,
+			AccessKey: access, SecretKey: secret, UsePathStyle: pathStyle,
+		})
+		if err != nil {
+			log.Fatalf("storage (s3): %v", err)
+		}
+		// Fail fast: never silently fall back to local disk when S3 is
+		// configured but unreachable (that would split the blob store).
+		if err := s3blobs.EnsureBucket(ctx); err != nil {
+			log.Fatalf("storage (s3): %v", err)
+		}
+		blobs = s3blobs
+		log.Printf("using s3-compatible storage endpoint=%s bucket=%s region=%s pathStyle=%v", ep, bucket, region, pathStyle)
+	} else {
+		blobDir := os.Getenv("QUORUM_BLOB_DIR")
+		if blobDir == "" {
+			blobDir = "./data/evidence"
+		}
+		fsblobs, err := storage.NewFilesystem(blobDir)
+		if err != nil {
+			log.Fatalf("storage: %v", err)
+		}
+		blobs = fsblobs
 	}
-	blobs, err := storage.NewFilesystem(blobDir)
-	if err != nil {
-		log.Fatalf("storage: %v", err)
+	cfg := server.ConfigFromEnv()
+	if len(cfg.APIKeys) == 0 {
+		log.Printf("QUORUM_API_KEYS unset: admin writes are OPEN (local dev only — set keys before exposing)")
 	}
-	srv := &http.Server{Addr: addr, Handler: server.New(st, blobs), ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{
+		Addr: addr, Handler: server.NewWithConfig(st, blobs, cfg),
+		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,
+		WriteTimeout: 60 * time.Second, IdleTimeout: 120 * time.Second,
+	}
 	log.Printf("quorum api listening on %s", addr)
 	log.Fatal(srv.ListenAndServe())
 }

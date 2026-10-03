@@ -15,6 +15,7 @@ jobs:
       - run: go version
       - run: go vet ./...
       - run: go test ./...
+      - run: node scripts/coverage.mjs
       - run: go build -o quorum ./apps/cli
       - run: ./quorum verify --repo https://github.com/example/tiny --commit abc123 --fixture-tiny
       - run: ./quorum audit verify --demo

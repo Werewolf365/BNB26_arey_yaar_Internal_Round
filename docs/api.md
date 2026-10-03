@@ -66,8 +66,17 @@ GET    /api/v1/ready                         # 200 only when DB reachable
 ## Rules (all endpoints)
 
 - Request validation + response/error schemas (this doc is normative).
-- Auth for administrative writes (builders PATCH, policies POST); reads open locally.
-- Rate limiting on externally exposed routes; structured logs with
+- Auth for administrative writes (builders POST/PATCH, policies POST): API keys via
+  `X-Api-Key` or `Authorization: Bearer`, configured with `QUORUM_API_KEYS`
+  (comma-separated, unset = open local-dev only). Missing key -> 401
+  `UNAUTHENTICATED`, wrong key -> 403 `FORBIDDEN` (constant-time compare, keys
+  never logged or echoed). Reads stay open locally.
+- Rate limiting on externally exposed routes (per-IP token bucket;
+  `QUORUM_RATE_LIMIT_RPS`/`QUORUM_RATE_BURST`, unset = disabled; over budget ->
+  429 `RATE_LIMITED`); JSON bodies capped at 1 MiB (`decodeJSON` via
+  `MaxBytesReader`); security headers (`nosniff`, `DENY`, `no-referrer`,
+  `default-src 'none'`) on every response; CORS only to allowlisted
+  `QUORUM_CORS_ORIGINS` with preflight support; structured logs with
   `request_id + verification_id + release_id + builder_id`; no secrets in logs.
 - Idempotency: POST releases/verifications accept `Idempotency-Key`; repeated
   delivery returns the original record, concurrent duplicates never corrupt state.
@@ -80,3 +89,25 @@ GET    /api/v1/ready                         # 200 only when DB reachable
 - Build jobs: `QUEUED → CLAIMED → SUCCEEDED|FAILED`, leases with `SKIP LOCKED`
   claiming, retries to `maxAttempts`, terminal duplicates rejected; enqueue
   requires registered builders; completion triggers quorum auto-evaluation.
+
+## Object storage (evidence blobs)
+
+Blobs are content-addressed under `sha256/<64 lowercase hex>` on every
+backend. Reads re-verify the hash (`AUDIT_TAMPERED` on mismatch); missing
+keys are `EVIDENCE_NOT_FOUND`; blobs over 64 MiB are `ARTIFACT_OVERSIZED`.
+
+- Default: filesystem backend rooted at `QUORUM_BLOB_DIR`
+  (default `./data/evidence`).
+- S3-compatible backend: set `QUORUM_S3_ENDPOINT` to select it, e.g.
+  `http://localhost:4566` for the compose LocalStack (`docker compose -f
+  infra/compose/docker-compose.yml up -d minio`). Knobs (with defaults):
+  `QUORUM_S3_BUCKET=quorum-evidence`, `QUORUM_S3_REGION=us-east-1`,
+  `QUORUM_S3_ACCESS_KEY` / `QUORUM_S3_SECRET_KEY` (default `test`/`test`
+  for local dev), `QUORUM_S3_PATH_STYLE=true` (keep `true` for
+  MinIO/LocalStack; set `false`/`0` for virtual-hosted AWS S3).
+- Startup with `QUORUM_S3_ENDPOINT` set ensures the bucket exists
+  (created when missing) and fails fast — no silent fallback to disk —
+  when storage is unreachable or credentials are wrong.
+- Live check (needs the daemon up, never in `test-all`):
+  `QUORUM_LIVE_S3=1 go test -run TestLiveS3 ./services/storage/`
+  (also wired into `make test-external`).

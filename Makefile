@@ -77,6 +77,7 @@ test-external:
 	OSS_REBUILD_MODE=live node --test test/external.*.test.mjs || echo "[external] SKIP: no credentials / tool absent"
 	QUORUM_LIVE_OSS=1 go test -run 'TestLiveLookup|TestOssLiveWiring' ./services/ossrebuild/ ./internal/runner/ || echo "[external] SKIP: oss-rebuild CLI absent"
 	QUORUM_LIVE_COSIGN=1 go test -run 'TestLive' ./services/cosign/ || echo "[external] SKIP: cosign absent / rekor unreachable"
+	QUORUM_LIVE_S3=1 go test -run 'TestLiveS3' ./services/storage/ || echo "[external] SKIP: s3-compat (localstack/minio) unreachable"
 
 test-all:
 	@echo "=== Quorum test-all (self-provisioning, deterministic, no external creds) ==="
@@ -95,7 +96,7 @@ format:
 	-@gofmt -l services apps packages || echo "[format] gofmt skipped (no Go toolchain)"
 
 coverage:
-	@echo "[coverage] Node harness has no line-coverage gate yet; Go coverage enforced in CI (>=90% overall, >=95% quorum/policy)"
+	node scripts/coverage.mjs
 
 demo:
 	node scripts/slice1-demo.mjs

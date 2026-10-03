@@ -3,9 +3,10 @@
 // It shells the real `cosign` CLI (install:
 // https://docs.sigstore.dev/cosign/installation/) and queries the Rekor
 // transparency log over HTTP. Reads that need no credentials stay default;
-// keyless (Fulcio) flows are NOT used — Quorum pins explicit keys
-// (bring-your-own key), so verification is deterministic and offline-capable
-// except for the explicit live paths below.
+// simple blob sign/verify pins explicit keys (bring-your-own key), while the
+// DSSE attest-blob path (services/cosign/attest.go) additionally supports
+// keyless (Fulcio/OIDC) signing passthrough and non-interactive keyless
+// verification by certificate identity.
 //
 // Design mirrors services/ossrebuild: deterministic fixture/offline behavior
 // is the default for tests; live mode is explicit and env-gated, and a

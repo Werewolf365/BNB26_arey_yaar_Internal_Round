@@ -71,6 +71,69 @@ func TestAttestCosignMatrix(t *testing.T) {
 	}
 }
 
+func TestAttestCosignAttestationMatrix(t *testing.T) {
+	bin := cosignStub(t)
+	dir := t.TempDir()
+	artifact := filepath.Join(dir, "b.bin")
+	os.WriteFile(artifact, []byte("quorum-cosign-attest-cli"), 0o600)
+	predicate := filepath.Join(dir, "predicate.json")
+	os.WriteFile(predicate, []byte(`{"cli":"attest"}`), 0o600)
+	env := filepath.Join(dir, "b.bundle.json")
+
+	// Attest then verify-attest round-trip (explicit key).
+	if code, _, _ := execute("attest", "cosign-attest-blob",
+		"--artifact", artifact, "--predicate", predicate, "--type", "custom",
+		"--key", "test-key", "--output-attestation", env,
+		"--cosign-bin", bin); code != 0 {
+		t.Fatalf("cosign-attest-blob must exit 0, got %d", code)
+	}
+	if code, out, _ := execute("attest", "cosign-verify-attestation",
+		"--artifact", artifact, "--signature", env,
+		"--key", "test-key", "--cosign-bin", bin); code != 0 || !strings.Contains(out, "verified") {
+		t.Fatalf("valid attestation must exit 0: %d %s", code, out)
+	}
+	// Keyless identity verify path (no --key) via stub.
+	if code, _, _ := execute("attest", "cosign-verify-attestation",
+		"--artifact", artifact, "--signature", env,
+		"--certificate-identity", "ci@example.com",
+		"--certificate-oidc-issuer", "https://accounts.example.com",
+		"--cosign-bin", bin); code != 0 {
+		t.Fatalf("keyless attestation verify must exit 0, got %d", code)
+	}
+	// Forged envelope -> rejected.
+	forged := filepath.Join(dir, "forged.bundle.json")
+	os.WriteFile(forged, []byte("forged"), 0o600)
+	if code, _, _ := execute("attest", "cosign-verify-attestation",
+		"--artifact", artifact, "--signature", forged,
+		"--key", "test-key", "--cosign-bin", bin); code != 1 {
+		t.Fatalf("forged attestation must exit 1, got %d", code)
+	}
+	// Wrong key -> rejected.
+	if code, _, _ := execute("attest", "cosign-verify-attestation",
+		"--artifact", artifact, "--signature", env,
+		"--key", "WRONG", "--cosign-bin", bin); code != 1 {
+		t.Fatalf("wrong-key attestation must exit 1, got %d", code)
+	}
+	// Missing binary -> operational, never a faked verdict.
+	if code, _, _ := execute("attest", "cosign-verify-attestation",
+		"--artifact", artifact, "--signature", env,
+		"--key", "test-key", "--cosign-bin", "cosign-definitely-missing"); code != 4 {
+		t.Fatalf("missing cosign must exit 4, got %d", code)
+	}
+	// Missing flags / missing trust anchor -> invalid.
+	for _, args := range [][]string{
+		{"attest", "cosign-attest-blob", "--artifact", artifact},
+		{"attest", "cosign-verify-attestation", "--artifact", artifact},
+		{"attest", "cosign-verify-attestation",
+			"--artifact", artifact, "--signature", env,
+			"--cosign-bin", bin},
+	} {
+		if code, _, _ := execute(args...); code != 5 {
+			t.Fatalf("%v must exit 5, got %d", args, code)
+		}
+	}
+}
+
 func TestAttestRekorGet(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/log/entries/", func(w http.ResponseWriter, r *http.Request) {

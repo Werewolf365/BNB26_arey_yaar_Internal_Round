@@ -34,9 +34,20 @@ Also hardened earlier: `--json` CLI errors now emit `{"error":...}` on stderr
 ## Remaining from the roadmap
 
 1. Web dashboard (Next.js + Playwright).
-2. Cosign keyless/Fulcio + DSSE `verify-blob-attestation` policy path (explicit-key
-   blob sign/verify + Rekor reads are live; see `services/cosign/`).
-3. S3-compatible object storage backend config (Filesystem backend is live).
-4. Production hardening (auth/rate-limits/archive-sandbox/quotas/SBOM/signing/scans).
-5. Coverage gate 90%/95% (currently ~70–85% measured).
+2. ~~Cosign keyless/Fulcio + DSSE `verify-blob-attestation` policy path~~ DONE:
+   `services/cosign/attest.go` (`AttestBlob` incl. keyless-sign passthrough,
+   `VerifyBlobAttestation` with explicit-key or Fulcio-identity trust anchor)
+   + `attest cosign-attest-blob | cosign-verify-attestation` wired with exit
+   contract 0/1/4/5 (explicit-key blob sign/verify + Rekor reads were already
+   live; see `services/cosign/`).
+3. S3-compatible object storage — DONE: `services/storage/s3.go` (in-file SigV4,
+   same key/error contract, fake-S3 + `QUORUM_LIVE_S3` live tests) selected via
+   `QUORUM_S3_ENDPOINT` with fail-fast `EnsureBucket`; LocalStack `:4566` dev target.
+4. Production hardening — DONE (API slice): `server.Config` (`QUORUM_API_KEYS`,
+   rate/CORS knobs), 401/403/429 mapping, headers, body caps, timeouts, full
+   negative-test matrices. Remaining: SBOM/signing/scans of Quorum itself.
+5. Coverage gate — DONE: `scripts/coverage.mjs` (+ `make coverage`, CI slice1):
+   unit 93.6% (>=90), criticals 95–100 (policy 100, cosign 98.6, sigstore 96.0,
+   runner 96.0, server 97.8); per-package floors lock it. Gated files
+   (postgres/docker/live) keep their own suites by design.
 6. Full demo + FINAL-REPORT + mutation/fuzz/chaos suites.

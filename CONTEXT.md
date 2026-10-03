@@ -38,17 +38,36 @@
 3. **Sigstore/Cosign** — DONE (Slice): local ECDSA-P256 DSSE signing/verification,
    provenance statement, identity/builder policy checks, dev transparency log,
    `quorum attest` CLI + API metadata; **plus live adapter**: `services/cosign`
-   shells the real CLI (`sign-blob`/`verify-blob`, explicit keys, bundle-preserving)
-   and `RekorClient` reads the public-good log (`PublicKey`/`Entry(uuid)`);
-   `attest cosign-sign|cosign-verify|rekor-get` wired with exit contract 0/1/4/5;
+   shells the real CLI (`sign-blob`/`verify-blob` with explicit keys,
+   bundle-preserving; `attest-blob`/`verify-blob-attestation` DSSE path with
+   explicit-key or keyless-Fulcio trust anchor, keyless signing passed through
+   as interactive OIDC) and `RekorClient` reads the public-good log
+   (`PublicKey`/`Entry(uuid)`);
+   `attest cosign-sign|cosign-verify|rekor-get|cosign-attest-blob|cosign-verify-attestation`
+   wired with exit contract 0/1/4/5;
    deterministic stub+httptest suite, live paths env-gated (`QUORUM_LIVE_COSIGN=1`).
 4. **Web dashboard** — Next.js: releases/builders/policy/audit/evidence pages + Playwright suite.
 5. **Object storage wiring** — DONE: content-addressed filesystem backend mounted
    into the API (`POST /evidence` base64 upload, metadata rows in Postgres,
-   `GET /evidence/:id/blob` download hash-verified on every read). S3-compatible
-   rollout remains config.
-6. **Security hardening** — API auth, rate limits, archive sandbox, quotas, SBOM/signing, scans.
-7. **Coverage gate** — 90% overall / 95% critical (now 68–86%; REQ-016 PARTIAL).
+   `GET /evidence/:id/blob` download hash-verified on every read), plus an
+   S3-compatible backend (`services/storage/s3.go`, in-file SigV4, same
+   key/error contract) selected via `QUORUM_S3_ENDPOINT` with fail-fast
+   startup; LocalStack compose service on `:4566` is the dev target
+   (see `docs/api.md` "Object storage").
+6. **Security hardening** — DONE (API slice): keyed auth on admin writes
+   (`QUORUM_API_KEYS`, 401/403, constant-time compare), per-IP rate limits
+   (429), security headers, allowlisted CORS, 1 MiB body caps, server
+   timeouts; secrets never logged. Remaining: SBOM/signing/scans of Quorum
+   itself, quotas beyond caps. Archive sandbox N/A: no extraction paths
+   server-side (verified by grep); traversal/SSRF/size guards live in
+   `services/verification/guards.mjs` + runner validators.
+7. **Coverage gate** — DONE (measured 2026-10-04, `node scripts/coverage.mjs`):
+   unit scope 93.6% (>=90 gate), criticals policy 100 / cosign 98.6 /
+   sigstore 96.0 / runner 96.0 / server 97.8 (all >=95 gate). Locked
+   per-package floors in the script + `make coverage` + CI slice1 enforce it.
+   Integration-gated files (`postgres.go`, docker rebuild paths, live
+   network paths) are covered by their own suites, excluded by design.
+   REQ-016 PASS (unit scope; full 90-incl-gated needs docker+live in CI).
 8. **Full demo + FINAL-REPORT** — 5 prompt scenarios, mutation/fuzz/chaos suites, `make test-all` green.
 
 ## Verify right now

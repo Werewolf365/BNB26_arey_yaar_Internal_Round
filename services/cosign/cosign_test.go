@@ -204,3 +204,75 @@ func TestLiveCosignRoundTrip(t *testing.T) {
 		t.Fatalf("live verify: %+v", r)
 	}
 }
+
+func TestRekorEdges(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/log/publicKey", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("not-a-pem-body"))
+	})
+	mux.HandleFunc("/api/v1/log/entries/json", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("not json{"))
+	})
+	mux.HandleFunc("/api/v1/log/entries/boom", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	mux.HandleFunc("/api/v1/log/entries/bad", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	rr := qcosign.RekorClient{BaseURL: srv.URL, Timeout: 10 * time.Second}
+	c, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := rr.PublicKey(c); err == nil {
+		t.Fatal("non-PEM publicKey must fail")
+	}
+	if _, err := rr.Entry(c, "json"); err == nil {
+		t.Fatal("non-JSON entry must fail")
+	}
+	if _, err := rr.Entry(c, "boom"); err == nil {
+		t.Fatal("500 entry must fail")
+	}
+	if _, err := rr.Entry(c, "bad"); err == nil {
+		t.Fatal("400 entry must fail")
+	}
+	// Unparseable base URL fails request construction, never a network call.
+	badURL := qcosign.RekorClient{BaseURL: "http://x\x7f", Timeout: 10 * time.Second}
+	if _, err := badURL.Entry(c, "x"); err == nil {
+		t.Fatal("bad base URL must fail")
+	}
+	// Entry against a dead endpoint surfaces UNAVAILABLE.
+	dead := qcosign.RekorClient{BaseURL: "http://127.0.0.1:1", Timeout: 3 * time.Second}
+	if _, err := dead.Entry(c, "x"); err == nil {
+		t.Fatal("dead endpoint entry must fail")
+	}
+	// Truncated body fails the read, non-200 publicKey fails liveness.
+	weird := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "publicKey") {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Length", "abc")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer weird.Close()
+	wr := qcosign.RekorClient{BaseURL: weird.URL, Timeout: 10 * time.Second}
+	if _, err := wr.PublicKey(c); err == nil {
+		t.Fatal("500 publicKey must fail")
+	}
+	if _, err := wr.Entry(c, "whatever"); err == nil {
+		t.Fatal("truncated body must fail")
+	}
+}
+
+func TestRekorCustomClient(t *testing.T) {
+	srv := rekorFixture(t)
+	defer srv.Close()
+	r := qcosign.RekorClient{BaseURL: srv.URL, Timeout: 10 * time.Second, Client: srv.Client()}
+	c, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pem, err := r.PublicKey(c)
+	if err != nil || !strings.Contains(pem, "BEGIN PUBLIC KEY") {
+		t.Fatalf("custom client: %v", err)
+	}
+}

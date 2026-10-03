@@ -52,9 +52,9 @@ func NewFilesystem(root string) (*Filesystem, error) {
 	return &Filesystem{root: abs}, nil
 }
 
-// keyPath validates a content key and resolves it under the root.
-// Only canonical sha256/<64hex> keys are accepted — nothing else.
-func (f *Filesystem) keyPath(key string) (string, error) {
+// validateContentKey enforces canonical sha256/<64 lowercase hex> shape.
+// Shared by the Filesystem and S3 backends; returns the hex digest.
+func validateContentKey(key string) (string, error) {
 	parts := strings.Split(key, "/")
 	if len(parts) != 2 || parts[0] != "sha256" || len(parts[1]) != 64 {
 		return "", fmt.Errorf("INVALID_INPUT: bad content key %q", key)
@@ -64,7 +64,17 @@ func (f *Filesystem) keyPath(key string) (string, error) {
 			return "", fmt.Errorf("INVALID_INPUT: bad content key %q", key)
 		}
 	}
-	p := filepath.Join(f.root, "sha256", parts[1][:2], parts[1][2:])
+	return parts[1], nil
+}
+
+// keyPath validates a content key and resolves it under the root.
+// Only canonical sha256/<64hex> keys are accepted — nothing else.
+func (f *Filesystem) keyPath(key string) (string, error) {
+	hexpart, err := validateContentKey(key)
+	if err != nil {
+		return "", err
+	}
+	p := filepath.Join(f.root, "sha256", hexpart[:2], hexpart[2:])
 	// Belt-and-braces: resolved path must stay under root (symlink-safe:
 	// writers use O_EXCL create + rename; readers resolve then re-check).
 	abs, err := filepath.Abs(p)

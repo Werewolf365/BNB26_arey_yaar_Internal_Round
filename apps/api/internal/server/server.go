@@ -28,11 +28,23 @@ type Server struct {
 	store store.Store
 	blobs storage.Backend
 	mux   *http.ServeMux
+	cfg   Config
+	// limiter is nil unless Config.RateLimitRPS > 0. It must live on the
+	// Server (not per-request) so per-IP buckets persist across requests.
+	limiter *rateLimiter
 }
 
-// New builds all routes.
+// New builds all routes with the open local-dev posture (see Config).
 func New(st store.Store, blobs storage.Backend) *Server {
-	s := &Server{store: st, blobs: blobs, mux: http.NewServeMux()}
+	return NewWithConfig(st, blobs, Config{})
+}
+
+// NewWithConfig builds all routes under an explicit security posture.
+func NewWithConfig(st store.Store, blobs storage.Backend, cfg Config) *Server {
+	s := &Server{store: st, blobs: blobs, mux: http.NewServeMux(), cfg: cfg}
+	if cfg.RateLimitRPS > 0 {
+		s.limiter = newRateLimiter(cfg.RateLimitRPS, cfg.burst())
+	}
 	s.mux.HandleFunc("GET /api/v1/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/v1/ready", s.handleReady)
 
@@ -79,7 +91,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(ctx)
 	start := time.Now()
 	rec := &statusRecorder{ResponseWriter: w, status: 200}
-	s.mux.ServeHTTP(rec, r)
+	s.secure(s.mux).ServeHTTP(rec, r)
 	log.Printf("request_id=%s method=%s path=%s status=%d elapsed=%s", rid, r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Millisecond))
 }
 
@@ -144,7 +156,9 @@ func classify(err error) (string, string, int) {
 		code = msg[:i]
 	}
 	// Suffix/prefix rules first so new typed codes classify correctly by
-	// construction; the explicit lists below only tune HTTP semantics.
+	// construction; the explicit cases below only cover codes that match no
+	// rule (kept for the docs/api.md contract even when no current handler
+	// emits them — e.g. OSS_REBUILD_UNAVAILABLE, BUILDER_TIMEOUT).
 	switch {
 	case strings.HasPrefix(code, "INVALID_"):
 		return code, trimPrefix(msg), 400
@@ -154,14 +168,12 @@ func classify(err error) (string, string, int) {
 		return code, trimPrefix(msg), 409
 	}
 	switch code {
-	case "INVALID_INPUT":
-		return code, trimPrefix(msg), 400
-	case "RELEASE_NOT_FOUND", "VERIFICATION_NOT_FOUND", "BUILDER_NOT_FOUND",
-		"POLICY_NOT_FOUND", "ANCHOR_NOT_FOUND", "EVIDENCE_NOT_FOUND",
-		"SOURCE_NOT_FOUND", "COMMIT_NOT_FOUND", "ARTIFACT_NOT_FOUND":
-		return code, trimPrefix(msg), 404
-	case "POLICY_CONFLICT", "ANCHOR_CONFLICT":
-		return code, trimPrefix(msg), 409
+	case "UNAUTHENTICATED":
+		return code, trimPrefix(msg), 401
+	case "FORBIDDEN":
+		return code, trimPrefix(msg), 403
+	case "RATE_LIMITED":
+		return code, trimPrefix(msg), 429
 	case "INSUFFICIENT_EVIDENCE", "POLICY_VIOLATION":
 		return code, trimPrefix(msg), 422
 	case "OSS_REBUILD_UNAVAILABLE", "BLOCKCHAIN_UNAVAILABLE":
@@ -186,9 +198,9 @@ func trimPrefix(msg string) string {
 	return msg
 }
 
-func decodeJSON(r *http.Request, v any) error {
+func (s *Server) decodeJSON(r *http.Request, v any) error {
 	defer r.Body.Close()
-	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)) // 1 MiB cap
+	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, s.cfg.maxBody()))
 	if err := dec.Decode(v); err != nil {
 		return fmt.Errorf("INVALID_INPUT: malformed JSON: %v", err)
 	}
@@ -232,7 +244,7 @@ func (s *Server) handleCreateRelease(w http.ResponseWriter, r *http.Request) {
 		Commit         string `json:"commit"`
 		ExpectedDigest string `json:"expectedDigest"`
 	}
-	if err := decodeJSON(r, &in); err != nil {
+	if err := s.decodeJSON(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -286,7 +298,7 @@ func (s *Server) handleCreateVerification(w http.ResponseWriter, r *http.Request
 		Policy    *policy.Policy    `json:"policy"`
 		Evidence  []policy.Evidence `json:"evidence"`
 	}
-	if err := decodeJSON(r, &in); err != nil {
+	if err := s.decodeJSON(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -398,7 +410,7 @@ func (s *Server) handleEnqueueJobs(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		BuilderIDs []string `json:"builderIds"`
 	}
-	if err := decodeJSON(r, &in); err != nil {
+	if err := s.decodeJSON(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -456,7 +468,7 @@ func (s *Server) handleClaimJob(w http.ResponseWriter, r *http.Request) {
 		Owner        string `json:"owner"`
 		LeaseSeconds int    `json:"leaseSeconds"`
 	}
-	if err := decodeJSON(r, &in); err != nil {
+	if err := s.decodeJSON(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -484,7 +496,7 @@ func (s *Server) handleCompleteJob(w http.ResponseWriter, r *http.Request) {
 		ErrorCode  string `json:"errorCode"`
 		ErrorDetail string `json:"errorDetail"`
 	}
-	if err := decodeJSON(r, &in); err != nil {
+	if err := s.decodeJSON(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -582,7 +594,7 @@ func (s *Server) handlePutEvidence(w http.ResponseWriter, r *http.Request) {
 		SHA256         string `json:"sha256"`
 		Data           string `json:"data"`
 	}
-	if err := decodeJSON(r, &in); err != nil {
+	if err := s.decodeJSON(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -676,7 +688,7 @@ func (s *Server) handleListBuilders(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateBuilder(w http.ResponseWriter, r *http.Request) {
 	var in store.Builder
-	if err := decodeJSON(r, &in); err != nil {
+	if err := s.decodeJSON(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -696,7 +708,7 @@ func (s *Server) handlePatchBuilder(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Enabled *bool `json:"enabled"`
 	}
-	if err := decodeJSON(r, &in); err != nil {
+	if err := s.decodeJSON(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -721,7 +733,7 @@ func (s *Server) handleListPolicies(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreatePolicy(w http.ResponseWriter, r *http.Request) {
 	var p policy.Policy
-	if err := decodeJSON(r, &p); err != nil {
+	if err := s.decodeJSON(r, &p); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -748,7 +760,7 @@ func (s *Server) handleCreatePolicy(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleValidatePolicy(w http.ResponseWriter, r *http.Request) {
 	var p policy.Policy
-	if err := decodeJSON(r, &p); err != nil {
+	if err := s.decodeJSON(r, &p); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -814,7 +826,7 @@ func (s *Server) handleAnchor(w http.ResponseWriter, r *http.Request) {
 		RPC            string `json:"rpc"`
 		Require        bool   `json:"required"`
 	}
-	if err := decodeJSON(r, &in); err != nil {
+	if err := s.decodeJSON(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}

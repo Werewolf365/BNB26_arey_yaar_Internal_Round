@@ -172,7 +172,7 @@ func newAttestCmd() *cobra.Command {
 	verify.Flags().String("expect-commit", "", "required source commit")
 	verify.Flags().StringSlice("allow-builder", nil, "allowlisted builder id (repeatable)")
 
-	a.AddCommand(gen, sign, verify, newCosignSignCmd(), newCosignVerifyCmd(), newRekorGetCmd())
+	a.AddCommand(gen, sign, verify, newCosignSignCmd(), newCosignVerifyCmd(), newRekorGetCmd(), newCosignAttestBlobCmd(), newCosignVerifyAttestationCmd())
 	return a
 }
 
@@ -316,5 +316,101 @@ func newRekorGetCmd() *cobra.Command {
 	}
 	c.Flags().String("uuid", "", "rekor entry UUID")
 	c.Flags().String("rekor-url", "", "rekor base URL (default: https://rekor.sigstore.dev)")
+	return c
+}
+
+// newCosignAttestBlobCmd creates a DSSE attestation over a blob with the real
+// cosign CLI: attest-blob --predicate --type [--key] --bundle --yes. The
+// --key flag is optional: when omitted the call is keyless (Fulcio/OIDC),
+// which is interactive (browser / ambient token) and unsuitable for headless
+// CI. --output-attestation is Quorum's flag name for the bundle file cosign
+// writes (--bundle upstream).
+func newCosignAttestBlobCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "cosign-attest-blob --artifact FILE --predicate FILE --type custom --output-attestation BUNDLE",
+		Short: "Attest a blob with the real cosign CLI (explicit key, or keyless when --key is omitted)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			artifact, _ := cmd.Flags().GetString("artifact")
+			predicate, _ := cmd.Flags().GetString("predicate")
+			predType, _ := cmd.Flags().GetString("type")
+			keyRef, _ := cmd.Flags().GetString("key")
+			out, _ := cmd.Flags().GetString("output-attestation")
+			bin, _ := cmd.Flags().GetString("cosign-bin")
+			if artifact == "" || predicate == "" || out == "" {
+				emitErr(cmd, "--artifact, --predicate and --output-attestation are required")
+				return &exitErr{code: exitcodes.InvalidInput}
+			}
+			p := qcosign.DefaultProvider()
+			if bin != "" {
+				p.Bin = bin
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+			defer cancel()
+			res := p.AttestBlob(ctx, keyRef, artifact, predicate, predType, out)
+			if res.State != qcosign.StateVerified {
+				emitErr(cmd, res.Detail)
+				return &exitErr{code: cosignExit(res.State)}
+			}
+			return emit(cmd, "attested "+out+"\n", map[string]string{"state": res.State, "attestation": out})
+		},
+	}
+	c.Flags().String("artifact", "", "artifact file to attest")
+	c.Flags().String("predicate", "", "predicate JSON file")
+	c.Flags().String("type", "custom", "predicate type (default: custom)")
+	c.Flags().String("key", "", "cosign key reference (omit for keyless Fulcio/OIDC signing, interactive)")
+	c.Flags().String("output-attestation", "", "attestation bundle output path (passed as --bundle to cosign)")
+	c.Flags().String("cosign-bin", "", "cosign executable (default: PATH lookup)")
+	return c
+}
+
+// newCosignVerifyAttestationCmd verifies a DSSE blob attestation with the
+// real cosign CLI: verify-blob-attestation --bundle (--key | Fulcio identity
+// pair). Exactly one trust anchor is required: --key for explicit keys, or
+// --certificate-identity plus --certificate-oidc-issuer for keyless Fulcio
+// certificates (non-interactive). --signature is Quorum's flag name for the
+// bundle file cosign reads (--bundle upstream). --rekor-url is an opt-in
+// passthrough for older cosign CLIs and is omitted when empty.
+func newCosignVerifyAttestationCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "cosign-verify-attestation --artifact FILE --signature BUNDLE",
+		Short: "Verify a blob attestation with the real cosign CLI (exit 0 valid, 1 invalid)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			artifact, _ := cmd.Flags().GetString("artifact")
+			sigPath, _ := cmd.Flags().GetString("signature")
+			keyRef, _ := cmd.Flags().GetString("key")
+			identity, _ := cmd.Flags().GetString("certificate-identity")
+			issuer, _ := cmd.Flags().GetString("certificate-oidc-issuer")
+			rekorURL, _ := cmd.Flags().GetString("rekor-url")
+			bin, _ := cmd.Flags().GetString("cosign-bin")
+			if artifact == "" || sigPath == "" {
+				emitErr(cmd, "--artifact and --signature are required")
+				return &exitErr{code: exitcodes.InvalidInput}
+			}
+			opts := qcosign.AttestOpts{KeyRef: keyRef, CertIdentity: identity, CertIssuer: issuer, RekorURL: rekorURL}
+			if !opts.HasAnchor() {
+				emitErr(cmd, "one trust anchor is required: --key or --certificate-identity plus --certificate-oidc-issuer")
+				return &exitErr{code: exitcodes.InvalidInput}
+			}
+			p := qcosign.DefaultProvider()
+			if bin != "" {
+				p.Bin = bin
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+			defer cancel()
+			res := p.VerifyBlobAttestation(ctx, opts, artifact, sigPath)
+			if res.State != qcosign.StateVerified {
+				emitErr(cmd, res.Detail)
+				return &exitErr{code: cosignExit(res.State)}
+			}
+			return emit(cmd, "cosign: attestation verified\n", map[string]string{"state": res.State})
+		},
+	}
+	c.Flags().String("artifact", "", "artifact file the attestation covers")
+	c.Flags().String("signature", "", "attestation bundle file (passed as --bundle to cosign)")
+	c.Flags().String("key", "", "trusted cosign public key / key reference")
+	c.Flags().String("certificate-identity", "", "Fulcio certificate identity for keyless verification")
+	c.Flags().String("certificate-oidc-issuer", "", "Fulcio OIDC issuer for keyless verification")
+	c.Flags().String("rekor-url", "", "rekor base URL passthrough for older cosign CLIs (default: omitted)")
+	c.Flags().String("cosign-bin", "", "cosign executable (default: PATH lookup)")
 	return c
 }

@@ -17,7 +17,7 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-var migrationOrder = []string{"0001_init.sql", "0002_jobs.sql"}
+var migrationOrder = []string{"0001_init.sql", "0002_jobs.sql", "0003_signed_worker_attestations.sql"}
 
 // Postgres is the production Store.
 type Postgres struct {
@@ -210,22 +210,22 @@ func (p *Postgres) UpsertBuilder(ctx context.Context, b Builder) (Builder, error
 	if b.IndependenceGroup == "" {
 		return Builder{}, fmt.Errorf("INVALID_INPUT: independence_group required")
 	}
-	_, err := p.pool.Exec(ctx, `INSERT INTO builders(id, display_name, independence_group, endpoint, enabled) VALUES ($1,$2,$3,$4,TRUE)
-		ON CONFLICT (id) DO UPDATE SET display_name=EXCLUDED.display_name, independence_group=EXCLUDED.independence_group, endpoint=EXCLUDED.endpoint`,
-		b.ID, b.DisplayName, b.IndependenceGroup, b.Endpoint)
+	_, err := p.pool.Exec(ctx, `INSERT INTO builders(id, display_name, independence_group, endpoint, signing_public_key, enabled) VALUES ($1,$2,$3,$4,$5,TRUE)
+		ON CONFLICT (id) DO UPDATE SET display_name=EXCLUDED.display_name, independence_group=EXCLUDED.independence_group, endpoint=EXCLUDED.endpoint, signing_public_key=EXCLUDED.signing_public_key`,
+		b.ID, b.DisplayName, b.IndependenceGroup, b.Endpoint, b.SigningPublicKey)
 	if err != nil {
 		return Builder{}, err
 	}
 	var out Builder
 	var enabled bool
-	err = p.pool.QueryRow(ctx, `SELECT id, display_name, independence_group, endpoint, enabled FROM builders WHERE id=$1`, b.ID).
-		Scan(&out.ID, &out.DisplayName, &out.IndependenceGroup, &out.Endpoint, &enabled)
+	err = p.pool.QueryRow(ctx, `SELECT id, display_name, independence_group, endpoint, signing_public_key, enabled FROM builders WHERE id=$1`, b.ID).
+		Scan(&out.ID, &out.DisplayName, &out.IndependenceGroup, &out.Endpoint, &out.SigningPublicKey, &enabled)
 	out.Enabled = enabled
 	return out, err
 }
 
 func (p *Postgres) ListBuilders(ctx context.Context) ([]Builder, error) {
-	rows, err := p.pool.Query(ctx, `SELECT id, display_name, independence_group, endpoint, enabled FROM builders ORDER BY id`)
+	rows, err := p.pool.Query(ctx, `SELECT id, display_name, independence_group, endpoint, signing_public_key, enabled FROM builders ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +233,7 @@ func (p *Postgres) ListBuilders(ctx context.Context) ([]Builder, error) {
 	out := []Builder{}
 	for rows.Next() {
 		var b Builder
-		if err := rows.Scan(&b.ID, &b.DisplayName, &b.IndependenceGroup, &b.Endpoint, &b.Enabled); err != nil {
+		if err := rows.Scan(&b.ID, &b.DisplayName, &b.IndependenceGroup, &b.Endpoint, &b.SigningPublicKey, &b.Enabled); err != nil {
 			return nil, err
 		}
 		out = append(out, b)
@@ -252,8 +252,8 @@ func (p *Postgres) PatchBuilder(ctx context.Context, id string, enabled *bool) (
 		}
 	}
 	var b Builder
-	err := p.pool.QueryRow(ctx, `SELECT id, display_name, independence_group, endpoint, enabled FROM builders WHERE id=$1`, id).
-		Scan(&b.ID, &b.DisplayName, &b.IndependenceGroup, &b.Endpoint, &b.Enabled)
+	err := p.pool.QueryRow(ctx, `SELECT id, display_name, independence_group, endpoint, signing_public_key, enabled FROM builders WHERE id=$1`, id).
+		Scan(&b.ID, &b.DisplayName, &b.IndependenceGroup, &b.Endpoint, &b.SigningPublicKey, &b.Enabled)
 	return b, notFoundError(err, "BUILDER_NOT_FOUND", id)
 }
 
@@ -411,7 +411,7 @@ func scanJob(row pgx.Row) (BuildJob, error) {
 	var j BuildJob
 	var lease pgtype.Timestamptz
 	err := row.Scan(&j.ID, &j.VerificationID, &j.BuilderID, &j.Status, &j.Attempts, &j.MaxAttempts,
-		&j.ResultDigest, &j.ResultCommit, &j.ErrorCode, &j.ErrorDetail, &j.LeaseOwner, &lease,
+		&j.ResultDigest, &j.ResultCommit, &j.Attestation, &j.SignatureValid, &j.ErrorCode, &j.ErrorDetail, &j.LeaseOwner, &lease,
 		&j.CreatedAt, &j.UpdatedAt)
 	if err != nil {
 		return j, err
@@ -424,7 +424,7 @@ func scanJob(row pgx.Row) (BuildJob, error) {
 	return j, nil
 }
 
-const jobColumns = `id, verification_id, builder_id, status, attempts, max_attempts, result_digest, result_commit, error_code, error_detail, lease_owner, lease_expires_at, created_at, updated_at`
+const jobColumns = `id, verification_id, builder_id, status, attempts, max_attempts, result_digest, result_commit, attestation, signature_valid, error_code, error_detail, lease_owner, lease_expires_at, created_at, updated_at`
 
 func (p *Postgres) EnqueueJobs(ctx context.Context, verificationID string, builderIDs []string) ([]BuildJob, error) {
 	var exists bool
@@ -503,7 +503,7 @@ func (p *Postgres) ClaimJob(ctx context.Context, owner string, lease time.Durati
 		)
 		RETURNING `+jobColumns, owner, secs).Scan(
 		&j.ID, &j.VerificationID, &j.BuilderID, &j.Status, &j.Attempts, &j.MaxAttempts,
-		&j.ResultDigest, &j.ResultCommit, &j.ErrorCode, &j.ErrorDetail, &j.LeaseOwner,
+		&j.ResultDigest, &j.ResultCommit, &j.Attestation, &j.SignatureValid, &j.ErrorCode, &j.ErrorDetail, &j.LeaseOwner,
 		&j.LeaseExpiresAt, &j.CreatedAt, &j.UpdatedAt)
 	if err == pgx.ErrNoRows {
 		return BuildJob{}, false, nil
@@ -514,7 +514,7 @@ func (p *Postgres) ClaimJob(ctx context.Context, owner string, lease time.Durati
 	return j, true, nil
 }
 
-func (p *Postgres) CompleteJob(ctx context.Context, id string, ok bool, digest, commit, errCode, errDetail string) (BuildJob, error) {
+func (p *Postgres) CompleteJob(ctx context.Context, id string, ok bool, digest, commit, errCode, errDetail, attestation string, signatureValid bool) (BuildJob, error) {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return BuildJob{}, err
@@ -523,7 +523,7 @@ func (p *Postgres) CompleteJob(ctx context.Context, id string, ok bool, digest, 
 	var j BuildJob
 	err = tx.QueryRow(ctx, `SELECT `+jobColumns+` FROM build_jobs WHERE id=$1 FOR UPDATE`, id).Scan(
 		&j.ID, &j.VerificationID, &j.BuilderID, &j.Status, &j.Attempts, &j.MaxAttempts,
-		&j.ResultDigest, &j.ResultCommit, &j.ErrorCode, &j.ErrorDetail, &j.LeaseOwner,
+		&j.ResultDigest, &j.ResultCommit, &j.Attestation, &j.SignatureValid, &j.ErrorCode, &j.ErrorDetail, &j.LeaseOwner,
 		&j.LeaseExpiresAt, &j.CreatedAt, &j.UpdatedAt)
 	if err == pgx.ErrNoRows {
 		return BuildJob{}, fmt.Errorf("JOB_NOT_FOUND: %s", id)
@@ -540,9 +540,9 @@ func (p *Postgres) CompleteJob(ctx context.Context, id string, ok bool, digest, 
 	} else if j.Attempts >= j.MaxAttempts {
 		next = "FAILED"
 	}
-	_, err = tx.Exec(ctx, `UPDATE build_jobs SET status=$1, result_digest=$2, result_commit=$3,
-		error_code=$4, error_detail=$5, lease_owner='', updated_at=now() WHERE id=$6`,
-		next, digest, commit, errCode, errDetail, id)
+	_, err = tx.Exec(ctx, `UPDATE build_jobs SET status=$1, result_digest=$2, result_commit=$3, attestation=$4, signature_valid=$5,
+		error_code=$6, error_detail=$7, lease_owner='', updated_at=now() WHERE id=$8`,
+		next, digest, commit, attestation, signatureValid, errCode, errDetail, id)
 	if err != nil {
 		return BuildJob{}, err
 	}

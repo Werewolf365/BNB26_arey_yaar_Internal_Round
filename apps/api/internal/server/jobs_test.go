@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/quorum/quorum/services/sigstore"
 )
 
 func TestBuildJobs(t *testing.T) {
@@ -76,8 +78,8 @@ func TestBuildJobs(t *testing.T) {
 	if code != 200 || !strings.Contains(string(env.Data), `"evaluation"`) {
 		t.Fatalf("second completion: %d %s", code, env.Data)
 	}
-	if !strings.Contains(string(env.Data), "VERIFIED") || strings.Contains(string(env.Data), "WITH_CONFLICT") {
-		t.Fatalf("two agreeing rebuilds must auto-verify: %s", env.Data)
+	if !strings.Contains(string(env.Data), "INSUFFICIENT_EVIDENCE") {
+		t.Fatalf("unsigned worker reports must not auto-verify: %s", env.Data)
 	}
 	// Queue drained.
 	if code, env := do(t, srv, "POST", "/api/v1/jobs/claim", `{"owner":"worker-1"}`, nil); code != 200 || !strings.Contains(string(env.Data), `"claimed":false`) {
@@ -126,5 +128,67 @@ func TestBuildJobsFailurePath(t *testing.T) {
 	}
 	if code, env := do(t, srv, "GET", "/api/v1/jobs/"+jid, "", nil); code != 200 || !strings.Contains(string(env.Data), "FAILED") {
 		t.Fatalf("job must be FAILED: %d %s", code, env.Data)
+	}
+}
+
+func TestSignedWorkerAttestationsCanSatisfyQuorum(t *testing.T) {
+	srv := newTestServer(t)
+	priv, err := sigstore.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, err := sigstore.PublicToPEM(&priv.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range []struct{ id, group string }{{"builder-a", "cloud-a"}, {"builder-b", "cloud-b"}} {
+		body, _ := json.Marshal(map[string]string{"id": b.id, "independenceGroup": b.group, "signingPublicKey": string(pub)})
+		if code, env := do(t, srv, "POST", "/api/v1/builders", string(body), nil); code != 201 {
+			t.Fatalf("register %s: %d %#v", b.id, code, env.Error)
+		}
+	}
+	rel := createRelease(t, srv, "")
+	code, env := do(t, srv, "POST", "/api/v1/verifications", fmt.Sprintf(`{"releaseId":%q,"evidence":%s}`, rel, agreeEvidence()), nil)
+	if code != 201 {
+		t.Fatalf("seed verification: %d", code)
+	}
+	vid := mustData[map[string]any](t, env)["id"].(string)
+	if code, _ := do(t, srv, "POST", "/api/v1/verifications/"+vid+"/jobs", `{"builderIds":["builder-a","builder-b"]}`, nil); code != 201 {
+		t.Fatalf("enqueue: %d", code)
+	}
+	d := "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	for n := 0; n < 2; n++ {
+		_, claim := do(t, srv, "POST", "/api/v1/jobs/claim", fmt.Sprintf(`{"owner":"worker-%d"}`, n), nil)
+		job := mustData[struct {
+			Job struct {
+				ID        string `json:"id"`
+				BuilderID string `json:"builderId"`
+			} `json:"job"`
+		}](t, claim).Job
+		if n == 0 {
+			wrong := sigstore.ProvenanceStatement("source-archive", d, "wrong-commit", job.BuilderID, "https://quorum.example/buildtypes/git-archive/v1")
+			forged, err := sigstore.SignStatement(wrong, priv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			badPayload, _ := json.Marshal(map[string]any{"ok": true, "digest": d, "commit": "abc123", "attestation": forged})
+			badCode, bad := do(t, srv, "POST", "/api/v1/jobs/"+job.ID+"/complete", string(badPayload), nil)
+			if badCode != 422 || bad.Error == nil || bad.Error.Code != "ATTESTATION_INVALID" {
+				t.Fatalf("replayed/wrong-commit attestation must be rejected: %d %#v", badCode, bad.Error)
+			}
+		}
+		st := sigstore.ProvenanceStatement("source-archive", d, "abc123", job.BuilderID, "https://quorum.example/buildtypes/git-archive/v1")
+		dsse, err := sigstore.SignStatement(st, priv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, _ := json.Marshal(map[string]any{"ok": true, "digest": d, "commit": "abc123", "attestation": dsse})
+		code, response := do(t, srv, "POST", "/api/v1/jobs/"+job.ID+"/complete", string(payload), nil)
+		if code != 200 {
+			t.Fatalf("signed completion: %d %#v", code, response.Error)
+		}
+		if n == 1 && !strings.Contains(string(response.Data), "VERIFIED") {
+			t.Fatalf("signed independent evidence must verify: %s", response.Data)
+		}
 	}
 }

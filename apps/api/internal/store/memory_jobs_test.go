@@ -72,7 +72,7 @@ func TestMemoryJobsQueue(t *testing.T) {
 	}
 	// Fail twice (attempts 2 < max 3): requeued, not terminal.
 	for i := 0; i < 2; i++ {
-		jf, err := m.CompleteJob(ctx, jr.ID, false, "", "", "BUILDER_FAILED", "boom")
+		jf, err := m.CompleteJob(ctx, jr.ID, false, "", "", "BUILDER_FAILED", "boom", "", false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -85,14 +85,14 @@ func TestMemoryJobsQueue(t *testing.T) {
 	if err != nil || !claimed {
 		t.Fatalf("reclaim: %v %v", claimed, err)
 	}
-	jf, err := m.CompleteJob(ctx, jc.ID, false, "", "", "BUILDER_FAILED", "boom")
+	jf, err := m.CompleteJob(ctx, jc.ID, false, "", "", "BUILDER_FAILED", "boom", "", false)
 	if err != nil || jf.Status != "FAILED" || jf.ErrorCode != "BUILDER_FAILED" {
 		t.Fatalf("exhausted failure must be FAILED: %+v %v", jf, err)
 	}
-	if _, err := m.CompleteJob(ctx, jc.ID, true, "d", "c", "", ""); err == nil {
+	if _, err := m.CompleteJob(ctx, jc.ID, true, "d", "c", "", "", "", false); err == nil {
 		t.Fatal("completing a terminal job must conflict")
 	}
-	if _, err := m.CompleteJob(ctx, "job_nope", true, "d", "c", "", ""); err == nil {
+	if _, err := m.CompleteJob(ctx, "job_nope", true, "d", "c", "", "", "", false); err == nil {
 		t.Fatal("completing a missing job must fail")
 	}
 	// Success path on the remaining job.
@@ -103,7 +103,7 @@ func TestMemoryJobsQueue(t *testing.T) {
 			other = j.ID
 		}
 	}
-	done, err := m.CompleteJob(ctx, other, true, "sha256:abc", "abc", "", "")
+	done, err := m.CompleteJob(ctx, other, true, "sha256:abc", "abc", "", "", "", false)
 	if err != nil || done.Status != "SUCCEEDED" || done.ResultDigest != "sha256:abc" {
 		t.Fatalf("success: %+v %v", done, err)
 	}

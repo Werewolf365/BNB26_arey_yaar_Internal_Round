@@ -74,7 +74,7 @@ func TestPostgresIntegration(t *testing.T) {
 		t.Fatal("list builders")
 	}
 	off := false
-	if _, err := pg.PatchBuilder(ctx, "pg-builder-a-" + uniq, &off); err != nil {
+	if _, err := pg.PatchBuilder(ctx, "pg-builder-a-"+uniq, &off); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pg.CreatePolicy(ctx, store.PolicyRecord{ID: "pg-policy-a-" + uniq, Version: "v1", Body: resPolicy(), PolicyHash: "sha256:x"}); err != nil {
@@ -147,11 +147,11 @@ func TestPostgresIntegration(t *testing.T) {
 	if err != nil || !claimed || j1b.ID != j1.ID || j1b.Attempts != 2 {
 		t.Fatalf("expired lease must be reclaimable: %v %v", err, claimed)
 	}
-	done, err := pg.CompleteJob(ctx, j1b.ID, true, "sha256:abc", "abc123", "", "")
+	done, err := pg.CompleteJob(ctx, j1b.ID, true, "sha256:abc", "abc123", "", "", "", false)
 	if err != nil || done.Status != "SUCCEEDED" {
 		t.Fatalf("complete: %v", err)
 	}
-	if _, err := pg.CompleteJob(ctx, j1b.ID, true, "sha256:abc", "abc123", "", ""); err == nil {
+	if _, err := pg.CompleteJob(ctx, j1b.ID, true, "sha256:abc", "abc123", "", "", "", false); err == nil {
 		t.Fatal("terminal job must reject recomplete")
 	}
 	if _, _, err := pg.ClaimJob(ctx, "", time.Minute); err == nil {

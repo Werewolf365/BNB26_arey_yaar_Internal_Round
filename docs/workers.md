@@ -15,7 +15,9 @@ POST /jobs/claim {owner}  →  GET verification → GET release (repo, commit)
 
 API auto-evaluates when all sibling jobs are terminal: succeeded digests become
 evidence (groups from the builder registry), failures become visible reasons,
-and a new verification row is recorded with an audit event.
+and a new verification row is recorded with an audit event. A successful digest
+counts under the default policy only when the worker also supplies a DSSE
+attestation verified against that builder's registered public key.
 
 ## Guarantees and limits
 
@@ -25,9 +27,10 @@ and a new verification row is recorded with an audit event.
   `golang:1.27.1-bookworm`). Host fallback exists but is **opt-in**
   (`--allow-host-fallback`, dev only, logged).
 - Rebuild target is the **source archive** (`git archive` digest): exact across
-  homogeneous toolchains. Proven live: two isolated workers rebuilding
-  `golang/example@7f05d21` produced identical `sha256:39193228…` → auto
-  `VERIFIED` (`docs/demo.md` has the transcript pointers).
+  homogeneous toolchains. Two isolated workers rebuilding
+  `golang/example@7f05d21` produced identical `sha256:39193228…`. A queue
+  result becomes `VERIFIED` only after each worker's registered signing key
+  verifies its DSSE provenance; raw digest reports stay visible but untrusted.
 - Cross-toolchain archive bytes differ (git 2.51 vs 2.39.5 proven) — builders
   are only comparable within one image; see `docs/builders.md`.
 - Compiled-binary reproducibility (PE vs ELF etc.) stays platform-scoped and
@@ -37,6 +40,6 @@ and a new verification row is recorded with an audit event.
 
 ```powershell
 go build -o quorum-worker ./apps/worker
-.\quorum-worker.exe --api http://localhost:8080 --owner worker-1        # poll loop
-.\quorum-worker.exe --api http://localhost:8080 --owner worker-1 --once # one job
+.\quorum-worker.exe --api http://localhost:8080 --owner builder-a --signing-key builder-a.pem
+.\quorum-worker.exe --api http://localhost:8080 --owner builder-a --signing-key builder-a.pem --once
 ```

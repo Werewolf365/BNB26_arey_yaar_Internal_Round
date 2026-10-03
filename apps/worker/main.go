@@ -14,6 +14,7 @@ import (
 
 	"github.com/quorum/quorum/apps/worker/internal/client"
 	"github.com/quorum/quorum/apps/worker/internal/rebuild"
+	"github.com/quorum/quorum/services/sigstore"
 )
 
 func main() {
@@ -27,11 +28,12 @@ func main() {
 	gitBin := flag.String("git", "git", "git binary (source acquisition only)")
 	workdir := flag.String("workdir", os.TempDir(), "scratch parent for fetched sources")
 	allowFallback := flag.Bool("allow-host-fallback", false, "ONLY for dev: archive on host when no Docker daemon (logged, never default)")
+	signingKey := flag.String("signing-key", "", "builder ECDSA P-256 private-key PEM; signs successful rebuild provenance")
 	flag.Parse()
 
 	c := client.New(*api, *owner)
 	for {
-		done, stop := runOnce(c, *timeout, *image, *dockerBin, *gitBin, *workdir, *allowFallback)
+		done, stop := runOnce(c, *timeout, *image, *dockerBin, *gitBin, *workdir, *allowFallback, *signingKey)
 		_ = done
 		if stop || *once {
 			return
@@ -41,7 +43,7 @@ func main() {
 }
 
 // runOnce claims and executes one job; stop=true means exit the loop.
-func runOnce(c *client.Client, timeout time.Duration, image, dockerBin, gitBin, workdir string, allowFallback bool) (bool, bool) {
+func runOnce(c *client.Client, timeout time.Duration, image, dockerBin, gitBin, workdir string, allowFallback bool, signingKey string) (bool, bool) {
 	job, claimed, err := c.Claim()
 	if err != nil {
 		log.Printf("owner=%s claim failed: %v", c.Owner, err)
@@ -57,32 +59,52 @@ func runOnce(c *client.Client, timeout time.Duration, image, dockerBin, gitBin, 
 
 	repo, commit, err := c.ReleaseForVerification(job.VerificationID)
 	if err != nil {
-		_ = c.Complete(job.ID, false, "", "", "SOURCE_NOT_FOUND", err.Error())
+		_ = c.Complete(job.ID, false, "", "", "SOURCE_NOT_FOUND", err.Error(), nil)
 		return true, false
 	}
 	// Source acquisition (network) happens outside the sandbox; the rebuild
 	// itself runs network-isolated with a read-only mount.
 	dir, err := rebuild.FetchCommit(ctx, gitBin, workdir, repo, commit)
 	if err != nil {
-		_ = c.Complete(job.ID, false, "", "", firstCode(err), err.Error())
+		_ = c.Complete(job.ID, false, "", "", firstCode(err), err.Error(), nil)
 		return true, false
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 	digest, err := rebuild.DockerArchiveDigest(ctx, dockerBin, image, dir, commit)
 	if err != nil {
 		if !allowFallback {
-			_ = c.Complete(job.ID, false, "", "", "BUILDER_FAILED", "sandbox unavailable and host fallback disabled: "+err.Error())
+			_ = c.Complete(job.ID, false, "", "", "BUILDER_FAILED", "sandbox unavailable and host fallback disabled: "+err.Error(), nil)
 			return true, false
 		}
 		// Dev-only fallback: logged, and the digest still flows through the
 		// quorum engine like any other evidence (never auto-trusted).
 		log.Printf("owner=%s DEV host fallback: %v", c.Owner, err)
 		if digest, err = rebuild.ArchiveDigest(ctx, gitBin, dir, commit); err != nil {
-			_ = c.Complete(job.ID, false, "", "", firstCode(err), err.Error())
+			_ = c.Complete(job.ID, false, "", "", firstCode(err), err.Error(), nil)
 			return true, false
 		}
 	}
-	if err := c.Complete(job.ID, true, digest, commit, "", ""); err != nil {
+	var attestation any
+	if signingKey != "" {
+		raw, err := os.ReadFile(signingKey)
+		if err != nil {
+			_ = c.Complete(job.ID, false, "", "", "SIGNATURE_INVALID", err.Error(), nil)
+			return true, false
+		}
+		priv, err := sigstore.ParsePrivatePEM(raw)
+		if err != nil {
+			_ = c.Complete(job.ID, false, "", "", "SIGNATURE_INVALID", err.Error(), nil)
+			return true, false
+		}
+		statement := sigstore.ProvenanceStatement("source-archive", digest, commit, job.BuilderID, "https://quorum.example/buildtypes/git-archive/v1")
+		env, err := sigstore.SignStatement(statement, priv)
+		if err != nil {
+			_ = c.Complete(job.ID, false, "", "", "SIGNATURE_INVALID", err.Error(), nil)
+			return true, false
+		}
+		attestation = env
+	}
+	if err := c.Complete(job.ID, true, digest, commit, "", "", attestation); err != nil {
 		log.Printf("owner=%s complete failed: %v", c.Owner, err)
 		return true, false
 	}

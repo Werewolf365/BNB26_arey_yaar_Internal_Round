@@ -36,7 +36,8 @@ GET    /api/v1/verifications/:id/jobs
 
 POST   /api/v1/jobs/claim                  # workers poll: {owner, leaseSeconds}
 GET    /api/v1/jobs/:id
-POST   /api/v1/jobs/:id/complete           # {ok, digest, commit, errorCode, errorDetail};
+POST   /api/v1/jobs/:id/complete           # {ok, digest, commit, errorCode, errorDetail, attestation?};
+                                           # attestation is verified against the registered builder key;
                                            # when all siblings terminal, auto-evaluates quorum
 
 POST   /api/v1/evidence                    # submit blob: {verificationId, kind, sha256?, data(base64)}

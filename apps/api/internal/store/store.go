@@ -10,37 +10,38 @@ import (
 )
 
 type Release struct {
-	ID             string `json:"id"`
-	Package        string `json:"package"`
-	Ecosystem      string `json:"ecosystem"`
-	Name           string `json:"name"`
-	Version        string `json:"version"`
-	Repo           string `json:"repo"`
-	Commit         string `json:"commit"`
-	ExpectedDigest string `json:"expectedDigest"`
-	Status         string `json:"status"`
+	ID             string    `json:"id"`
+	Package        string    `json:"package"`
+	Ecosystem      string    `json:"ecosystem"`
+	Name           string    `json:"name"`
+	Version        string    `json:"version"`
+	Repo           string    `json:"repo"`
+	Commit         string    `json:"commit"`
+	ExpectedDigest string    `json:"expectedDigest"`
+	Status         string    `json:"status"`
 	CreatedAt      time.Time `json:"createdAt"`
 }
 
 type Verification struct {
-	ID           string            `json:"id"`
-	ReleaseID    string            `json:"releaseId"`
-	PolicyID     string            `json:"policyId"`
-	Decision     string            `json:"decision"`
-	Required     int               `json:"required"`
-	Satisfied    int               `json:"satisfied"`
-	Result       policy.Result     `json:"result"`
-	Evidence     []policy.Evidence `json:"evidence"`
-	ExpectedSrc  string            `json:"expectedSource"`
-	CreatedAt    time.Time         `json:"createdAt"`
+	ID          string            `json:"id"`
+	ReleaseID   string            `json:"releaseId"`
+	PolicyID    string            `json:"policyId"`
+	Decision    string            `json:"decision"`
+	Required    int               `json:"required"`
+	Satisfied   int               `json:"satisfied"`
+	Result      policy.Result     `json:"result"`
+	Evidence    []policy.Evidence `json:"evidence"`
+	ExpectedSrc string            `json:"expectedSource"`
+	CreatedAt   time.Time         `json:"createdAt"`
 }
 
 type Builder struct {
-	ID               string `json:"id"`
-	DisplayName      string `json:"displayName"`
+	ID                string `json:"id"`
+	DisplayName       string `json:"displayName"`
 	IndependenceGroup string `json:"independenceGroup"`
-	Endpoint         string `json:"endpoint"`
-	Enabled          bool   `json:"enabled"`
+	Endpoint          string `json:"endpoint"`
+	SigningPublicKey  string `json:"signingPublicKey,omitempty"`
+	Enabled           bool   `json:"enabled"`
 }
 
 type PolicyRecord struct {
@@ -53,7 +54,7 @@ type PolicyRecord struct {
 type AuditRecord struct {
 	ID             int64          `json:"id"`
 	EventType      string         `json:"eventType"`
-	Payload        map[string]any  `json:"payload"`
+	Payload        map[string]any `json:"payload"`
 	VerificationID string         `json:"verificationId"`
 	PreviousHash   string         `json:"previousHash"`
 	RecordHash     string         `json:"recordHash"`
@@ -113,24 +114,26 @@ type Store interface {
 	GetJob(ctx context.Context, id string) (BuildJob, error)
 	// ClaimJob atomically moves one QUEUED job (or an expired lease) to CLAIMED.
 	ClaimJob(ctx context.Context, owner string, lease time.Duration) (BuildJob, bool, error)
-	CompleteJob(ctx context.Context, id string, ok bool, digest, commit, errCode, errDetail string) (BuildJob, error)
+	CompleteJob(ctx context.Context, id string, ok bool, digest, commit, errCode, errDetail, attestation string, signatureValid bool) (BuildJob, error)
 }
 
 // BuildJob statuses: QUEUED -> CLAIMED -> RUNNING -> SUCCEEDED | FAILED.
 // A job whose lease expired is claimable again (attempts incremented).
 type BuildJob struct {
-	ID              string    `json:"id"`
-	VerificationID  string    `json:"verificationId"`
-	BuilderID       string    `json:"builderId"`
-	Status          string    `json:"status"`
-	Attempts        int       `json:"attempts"`
-	MaxAttempts     int       `json:"maxAttempts"`
-	ResultDigest    string    `json:"resultDigest"`
-	ResultCommit    string    `json:"resultCommit"`
-	ErrorCode       string    `json:"errorCode"`
-	ErrorDetail     string    `json:"errorDetail"`
-	LeaseOwner      string    `json:"leaseOwner"`
-	LeaseExpiresAt  time.Time `json:"leaseExpiresAt,omitempty"`
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
+	ID             string    `json:"id"`
+	VerificationID string    `json:"verificationId"`
+	BuilderID      string    `json:"builderId"`
+	Status         string    `json:"status"`
+	Attempts       int       `json:"attempts"`
+	MaxAttempts    int       `json:"maxAttempts"`
+	ResultDigest   string    `json:"resultDigest"`
+	ResultCommit   string    `json:"resultCommit"`
+	Attestation    string    `json:"attestation,omitempty"`
+	SignatureValid bool      `json:"signatureValid"`
+	ErrorCode      string    `json:"errorCode"`
+	ErrorDetail    string    `json:"errorDetail"`
+	LeaseOwner     string    `json:"leaseOwner"`
+	LeaseExpiresAt time.Time `json:"leaseExpiresAt,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }

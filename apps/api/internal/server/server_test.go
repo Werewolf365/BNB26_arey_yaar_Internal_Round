@@ -18,8 +18,8 @@ import (
 )
 
 type envelope struct {
-	Data      json.RawMessage `json:"data"`
-	Error     *struct {
+	Data  json.RawMessage `json:"data"`
+	Error *struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
@@ -195,7 +195,8 @@ func TestVerifications(t *testing.T) {
 	}
 }
 
-func TestConcurrentIdempotentReleases(t *testing.T) {	srv := newTestServer(t)
+func TestConcurrentIdempotentReleases(t *testing.T) {
+	srv := newTestServer(t)
 	const n = 10
 	ids := make([]string, n)
 	var wg sync.WaitGroup

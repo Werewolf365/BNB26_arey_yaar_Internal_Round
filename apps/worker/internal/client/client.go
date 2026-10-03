@@ -20,14 +20,14 @@ type Client struct {
 
 // Job is the claim/complete payload subset.
 type Job struct {
-	ID              string `json:"id"`
-	VerificationID  string `json:"verificationId"`
-	BuilderID       string `json:"builderId"`
-	Status          string `json:"status"`
-	Attempts        int    `json:"attempts"`
-	MaxAttempts     int    `json:"maxAttempts"`
-	ResultDigest    string `json:"resultDigest"`
-	ResultCommit    string `json:"resultCommit"`
+	ID             string `json:"id"`
+	VerificationID string `json:"verificationId"`
+	BuilderID      string `json:"builderId"`
+	Status         string `json:"status"`
+	Attempts       int    `json:"attempts"`
+	MaxAttempts    int    `json:"maxAttempts"`
+	ResultDigest   string `json:"resultDigest"`
+	ResultCommit   string `json:"resultCommit"`
 }
 
 func New(base, owner string) *Client {
@@ -138,9 +138,9 @@ func (c *Client) ReleaseForVerification(verificationID string) (repo, commit str
 }
 
 // Complete reports the rebuild outcome. ok=false must carry an error code.
-func (c *Client) Complete(jobID string, ok bool, digest, commit, errCode, errDetail string) error {
+func (c *Client) Complete(jobID string, ok bool, digest, commit, errCode, errDetail string, attestation any) error {
 	raw, status, err := c.call("POST", "/api/v1/jobs/"+jobID+"/complete",
-		map[string]any{"ok": ok, "digest": digest, "commit": commit, "errorCode": errCode, "errorDetail": errDetail})
+		map[string]any{"ok": ok, "digest": digest, "commit": commit, "errorCode": errCode, "errorDetail": errDetail, "attestation": attestation})
 	if err != nil {
 		return err
 	}

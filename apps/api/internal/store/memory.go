@@ -352,7 +352,7 @@ func (m *MemoryStore) ClaimJob(ctx context.Context, owner string, lease time.Dur
 	return *best, true, nil
 }
 
-func (m *MemoryStore) CompleteJob(ctx context.Context, id string, ok bool, digest, commit, errCode, errDetail string) (BuildJob, error) {
+func (m *MemoryStore) CompleteJob(ctx context.Context, id string, ok bool, digest, commit, errCode, errDetail, attestation string, signatureValid bool) (BuildJob, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	j, found := m.jobs[id]
@@ -366,6 +366,8 @@ func (m *MemoryStore) CompleteJob(ctx context.Context, id string, ok bool, diges
 		j.Status = "SUCCEEDED"
 		j.ResultDigest = digest
 		j.ResultCommit = commit
+		j.Attestation = attestation
+		j.SignatureValid = signatureValid
 	} else if j.Attempts >= j.MaxAttempts {
 		j.Status = "FAILED"
 		j.ErrorCode = errCode

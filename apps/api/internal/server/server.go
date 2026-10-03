@@ -5,6 +5,7 @@ package server
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -17,9 +18,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/quorum/quorum/internal/runner"
 	"github.com/quorum/quorum/apps/api/internal/store"
+	"github.com/quorum/quorum/internal/runner"
 	"github.com/quorum/quorum/services/policy"
+	"github.com/quorum/quorum/services/sigstore"
 	"github.com/quorum/quorum/services/storage"
 )
 
@@ -114,9 +116,9 @@ func (s *statusRecorder) WriteHeader(code int) {
 }
 
 type envelope struct {
-	Data      any    `json:"data,omitempty"`
+	Data      any       `json:"data,omitempty"`
 	Error     *apiError `json:"error,omitempty"`
-	RequestID string `json:"requestId"`
+	RequestID string    `json:"requestId"`
 }
 
 type apiError struct {
@@ -490,17 +492,58 @@ func (s *Server) handleClaimJob(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCompleteJob(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		OK         bool   `json:"ok"`
-		Digest     string `json:"digest"`
-		Commit     string `json:"commit"`
-		ErrorCode  string `json:"errorCode"`
-		ErrorDetail string `json:"errorDetail"`
+		OK          bool            `json:"ok"`
+		Digest      string          `json:"digest"`
+		Commit      string          `json:"commit"`
+		ErrorCode   string          `json:"errorCode"`
+		ErrorDetail string          `json:"errorDetail"`
+		Attestation json.RawMessage `json:"attestation"`
 	}
 	if err := s.decodeJSON(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}
-	j, err := s.store.CompleteJob(r.Context(), r.PathValue("id"), in.OK, in.Digest, in.Commit, in.ErrorCode, in.ErrorDetail)
+	signatureValid := false
+	attestation := string(in.Attestation)
+	if in.OK && len(in.Attestation) > 0 {
+		job, err := s.store.GetJob(r.Context(), r.PathValue("id"))
+		if err != nil {
+			writeErr(w, r, err)
+			return
+		}
+		builders, err := s.store.ListBuilders(r.Context())
+		if err != nil {
+			writeErr(w, r, err)
+			return
+		}
+		var builder *store.Builder
+		for i := range builders {
+			if builders[i].ID == job.BuilderID {
+				builder = &builders[i]
+				break
+			}
+		}
+		if builder == nil || builder.SigningPublicKey == "" {
+			writeErr(w, r, fmt.Errorf("SIGNER_NOT_TRUSTED: builder %q has no registered signing key", job.BuilderID))
+			return
+		}
+		pub, err := sigstore.ParsePublicPEM([]byte(builder.SigningPublicKey))
+		if err != nil {
+			writeErr(w, r, fmt.Errorf("SIGNER_NOT_TRUSTED: registered key for %q is invalid: %v", job.BuilderID, err))
+			return
+		}
+		var env sigstore.Envelope
+		if err := json.Unmarshal(in.Attestation, &env); err != nil {
+			writeErr(w, r, fmt.Errorf("ATTESTATION_INVALID: malformed DSSE envelope: %v", err))
+			return
+		}
+		if _, err := sigstore.VerifyPolicy(env, []*ecdsa.PublicKey{pub}, in.Digest, in.Commit, []string{job.BuilderID}); err != nil {
+			writeErr(w, r, err)
+			return
+		}
+		signatureValid = true
+	}
+	j, err := s.store.CompleteJob(r.Context(), r.PathValue("id"), in.OK, in.Digest, in.Commit, in.ErrorCode, in.ErrorDetail, attestation, signatureValid)
 	if err != nil {
 		writeErr(w, r, err)
 		return
@@ -553,7 +596,7 @@ func (s *Server) handleCompleteJob(w http.ResponseWriter, r *http.Request) {
 			evidence = append(evidence, policy.Evidence{
 				BuilderID: sib.BuilderID, IndependenceGroup: groups[sib.BuilderID],
 				SourceCommit: sib.ResultCommit, ArtifactDigest: sib.ResultDigest,
-				SignatureValid: true, VerificationSource: "builder",
+				SignatureValid: sib.SignatureValid, VerificationSource: "builder",
 			})
 		} else {
 			notes = append(notes, fmt.Sprintf("builder %s failed: %s", sib.BuilderID, sib.ErrorCode))

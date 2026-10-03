@@ -99,3 +99,46 @@ this point.
 
 `apps/cli` `apps/api` `services/{policy,canonical,attestation,audit,verification,oss-rebuild,builders,blockchain}`
 `internal/{runner,exitcodes}` `packages/{schemas,fixtures}` `contracts/` `infra/compose` `docs/` `fixtures/` `scripts/`
+
+## Change log — 2026-10-04: README rewrite + full-codebase review
+
+- Read all root `.md` files (`README`, `CONTEXT`, `DESIGN`, `PRODUCT`,
+  `CONTRIBUTING`, `SECURITY`, `demo_time`, `prompt.md` §§0–41) plus
+  `docs/` (api, cli, architecture, blockchain, demo, limitations, HANDOFF),
+  `Makefile`, `package.json`, `go.mod`, `infra/compose/docker-compose.yml`,
+  `apps/api/main.go`, `apps/web/src/app/page.tsx`,
+  `contracts/src/QuorumAnchor.sol`.
+- Verified live: `npm test` 21/21 PASS, `go test ./services/policy/
+  ./internal/runner/` ok, `node scripts/slice1-demo.mjs` 3/3 PASS
+  (VERIFIED / REJECTED+ARTIFACT_HASH_MISMATCH / VERIFIED_WITH_CONFLICT,
+  audit OK, anchor SKIPPED). Docker daemon up (29.1.3); compose services
+  confirmed: `postgres`, `minio`, `anvil`.
+- Rewrote `README.md`: was Slice-1-only (PowerShell, `quorum-api.exe`,
+  no worker/web/cosign/storage/security/coverage). Now documents actual
+  tree (cli/api/worker/web, sigstore/cosign/ossrebuild/storage, runner,
+  contracts, compose ports 5433/4566/8545 + :8080/:3000), full Docker
+  bring-up command, manual web test (seed builders/releases, open
+  :3000), manual blockchain test (make test-contracts, TestAnchorLive,
+  cast via docker foundry), CLI/worker loops, exit codes 0–5, API route
+  table + env vars, testing gates, honest "What's lacking" section.
+- No code changed; docs only (README.md + this CONTEXT.md entry).
+
+## Change log — 2026-10-04: one-command Docker stack
+
+- `docker compose up --build -d` now starts everything (postgres + anvil +
+  api + web); previously only infra (postgres/minio/anvil) was composed and
+  api/web/worker needed manual `go build` + exports + `npm run dev`.
+- Added `infra/docker/api.Dockerfile` (Go multi-stage, non-root, curl
+  healthcheck on `/api/v1/health`), `infra/docker/web.Dockerfile`
+  (Node 20 multi-stage, `NEXT_PUBLIC_API_BASE` build arg, serves `:3000`),
+  `infra/docker/worker.Dockerfile` (needs `/var/run/docker.sock`,
+  `--profile worker` opt-in).
+- Compose: api (Postgres + filesystem blobs by default, `restart:
+  unless-stopped`, `depends_on` postgres healthy), web, port overrides
+  (`QUORUM_API_PORT`/`QUORUM_WEB_PORT`), S3/MinIO moved to `--profile s3`
+  opt-in (LocalStack `latest` now demands a license; `minio/minio` is the
+  S3 target; empty `QUORUM_S3_ENDPOINT` = fs backend, same contract).
+- Verified: full `up --build -d` on alternate ports (8080/3000 were taken
+  by another project here), api `/health` + `/ready` ok, `POST /releases`
+  201 persisted to Postgres, audit chain appended, web `/` 200 with title.
+  Test api/web containers removed afterwards; postgres/anvil left running.

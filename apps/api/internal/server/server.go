@@ -6,6 +6,8 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -18,17 +20,19 @@ import (
 	"github.com/quorum/quorum/internal/runner"
 	"github.com/quorum/quorum/apps/api/internal/store"
 	"github.com/quorum/quorum/services/policy"
+	"github.com/quorum/quorum/services/storage"
 )
 
 // Server wires routes to a Store.
 type Server struct {
 	store store.Store
+	blobs storage.Backend
 	mux   *http.ServeMux
 }
 
 // New builds all routes.
-func New(st store.Store) *Server {
-	s := &Server{store: st, mux: http.NewServeMux()}
+func New(st store.Store, blobs storage.Backend) *Server {
+	s := &Server{store: st, blobs: blobs, mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /api/v1/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/v1/ready", s.handleReady)
 
@@ -65,6 +69,7 @@ func New(st store.Store) *Server {
 	s.mux.HandleFunc("POST /api/v1/jobs/{id}/complete", s.handleCompleteJob)
 
 	s.mux.HandleFunc("POST /api/v1/evidence", s.handlePutEvidence)
+	s.mux.HandleFunc("GET /api/v1/evidence/{id}/blob", s.handleGetEvidenceBlob)
 	return s
 }
 
@@ -566,22 +571,65 @@ func (s *Server) handleCompleteJob(w http.ResponseWriter, r *http.Request) {
 
 // --- evidence submit ---
 
+// Submit a raw blob: JSON body {verificationId, kind, sha256?, data} with
+// data base64-encoded. The blob is content-addressed (sha256/<hex>), the
+// declared sha256 (if present) must match the computed one, and a metadata
+// row is persisted. The raw client-supplied path is never trusted.
 func (s *Server) handlePutEvidence(w http.ResponseWriter, r *http.Request) {
-	var in store.EvidenceObject
+	var in struct {
+		VerificationID string `json:"verificationId"`
+		Kind           string `json:"kind"`
+		SHA256         string `json:"sha256"`
+		Data           string `json:"data"`
+	}
 	if err := decodeJSON(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}
-	if in.VerificationID == "" || in.Kind == "" || in.StorageKey == "" || in.SHA256 == "" {
-		writeErr(w, r, fmt.Errorf("INVALID_INPUT: verificationId, kind, storageKey and sha256 are required"))
+	if in.VerificationID == "" || in.Kind == "" || in.Data == "" {
+		writeErr(w, r, fmt.Errorf("INVALID_INPUT: verificationId, kind and data are required"))
 		return
 	}
-	e, err := s.store.PutEvidence(r.Context(), in)
+	if _, err := s.store.GetVerification(r.Context(), in.VerificationID); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	data, err := base64.StdEncoding.DecodeString(in.Data)
+	if err != nil {
+		writeErr(w, r, fmt.Errorf("INVALID_INPUT: data must be base64 encoded"))
+		return
+	}
+	computed := hex.EncodeToString(sha256Bytes(data))
+	if in.SHA256 != "" && in.SHA256 != computed {
+		writeErr(w, r, fmt.Errorf("INVALID_INPUT: declared sha256 does not match computed"))
+		return
+	}
+	if s.blobs == nil {
+		writeErr(w, r, fmt.Errorf("INTERNAL_ERROR: storage backend not configured"))
+		return
+	}
+	key, err := s.blobs.Put(data)
 	if err != nil {
 		writeErr(w, r, err)
 		return
 	}
+	e, err := s.store.PutEvidence(r.Context(), store.EvidenceObject{
+		VerificationID: in.VerificationID, Kind: in.Kind, StorageKey: key, SHA256: computed,
+	})
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	if _, aerr := s.store.AppendAudit(r.Context(), "evidence.submitted", map[string]any{"evidenceId": e.ID, "key": key}, in.VerificationID); aerr != nil {
+		writeErr(w, r, aerr)
+		return
+	}
 	writeJSON(w, r, 201, e)
+}
+
+func sha256Bytes(data []byte) []byte {
+	sum := sha256.Sum256(data)
+	return sum[:]
 }
 
 func (s *Server) handleGetEvidence(w http.ResponseWriter, r *http.Request) {
@@ -591,6 +639,28 @@ func (s *Server) handleGetEvidence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, r, 200, e)
+}
+
+// Raw blob download: hash-verified on every read (tamper-evident).
+func (s *Server) handleGetEvidenceBlob(w http.ResponseWriter, r *http.Request) {
+	e, err := s.store.GetEvidence(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	if s.blobs == nil {
+		writeErr(w, r, fmt.Errorf("INTERNAL_ERROR: storage backend not configured"))
+		return
+	}
+	data, err := s.blobs.Get(e.StorageKey)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", fmt.Sprint(len(data)))
+	w.WriteHeader(200)
+	_, _ = w.Write(data)
 }
 
 // --- builders ---

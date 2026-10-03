@@ -39,8 +39,9 @@ GET    /api/v1/jobs/:id
 POST   /api/v1/jobs/:id/complete           # {ok, digest, commit, errorCode, errorDetail};
                                            # when all siblings terminal, auto-evaluates quorum
 
-POST   /api/v1/evidence                    # submit evidence objects
-GET    /api/v1/evidence/:id
+POST   /api/v1/evidence                    # submit blob: {verificationId, kind, sha256?, data(base64)}
+GET    /api/v1/evidence/:id                # metadata
+GET    /api/v1/evidence/:id/blob           # raw blob, hash-verified on read
 GET    /api/v1/attestations/:id
 
 GET    /api/v1/builders

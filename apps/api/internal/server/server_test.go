@@ -2,6 +2,9 @@ package server_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
@@ -11,6 +14,7 @@ import (
 
 	"github.com/quorum/quorum/apps/api/internal/server"
 	"github.com/quorum/quorum/apps/api/internal/store"
+	"github.com/quorum/quorum/services/storage"
 )
 
 type envelope struct {
@@ -22,7 +26,14 @@ type envelope struct {
 	RequestID string `json:"requestId"`
 }
 
-func newTestServer() *server.Server { return server.New(store.NewMemoryStore()) }
+func newTestServer(t *testing.T) *server.Server {
+	t.Helper()
+	fs, err := storage.NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return server.New(store.NewMemoryStore(), fs)
+}
 
 // do sends a request; body may be a JSON string or nil.
 func do(t *testing.T, srv *server.Server, method, path, body string, headers map[string]string) (int, envelope) {
@@ -59,7 +70,7 @@ func mustData[T any](t *testing.T, env envelope) T {
 }
 
 func TestHealthReady(t *testing.T) {
-	srv := newTestServer()
+	srv := newTestServer(t)
 	if code, _ := do(t, srv, "GET", "/api/v1/health", "", nil); code != 200 {
 		t.Fatalf("health: %d", code)
 	}
@@ -92,7 +103,7 @@ func createRelease(t *testing.T, srv *server.Server, key string) string {
 }
 
 func TestReleases(t *testing.T) {
-	srv := newTestServer()
+	srv := newTestServer(t)
 	id := createRelease(t, srv, "rel-key-1")
 	// Idempotent replay returns the same record with 200.
 	code, env := do(t, srv, "POST", "/api/v1/releases",
@@ -137,7 +148,7 @@ func agreeEvidence() string {
 }
 
 func TestVerifications(t *testing.T) {
-	srv := newTestServer()
+	srv := newTestServer(t)
 	rel := createRelease(t, srv, "")
 	body := fmt.Sprintf(`{"releaseId":%q,"evidence":%s}`, rel, agreeEvidence())
 	code, env := do(t, srv, "POST", "/api/v1/verifications", body, map[string]string{"Idempotency-Key": "ver-key-1"})
@@ -184,8 +195,7 @@ func TestVerifications(t *testing.T) {
 	}
 }
 
-func TestConcurrentIdempotentReleases(t *testing.T) {
-	srv := newTestServer()
+func TestConcurrentIdempotentReleases(t *testing.T) {	srv := newTestServer(t)
 	const n = 10
 	ids := make([]string, n)
 	var wg sync.WaitGroup
@@ -207,7 +217,7 @@ func TestConcurrentIdempotentReleases(t *testing.T) {
 }
 
 func TestBuildersPolicies(t *testing.T) {
-	srv := newTestServer()
+	srv := newTestServer(t)
 	// Register + list + disable.
 	if code, _ := do(t, srv, "POST", "/api/v1/builders", `{"id":"builder-a","independenceGroup":"cloud-a"}`, nil); code != 201 {
 		t.Fatalf("register: %d", code)
@@ -244,7 +254,7 @@ func TestBuildersPolicies(t *testing.T) {
 }
 
 func TestAuditAndEvidence(t *testing.T) {
-	srv := newTestServer()
+	srv := newTestServer(t)
 	rel := createRelease(t, srv, "")
 	do(t, srv, "POST", "/api/v1/verifications", fmt.Sprintf(`{"releaseId":%q,"evidence":%s}`, rel, agreeEvidence()), nil)
 	// Audit trail exists and verifies.
@@ -274,5 +284,43 @@ func TestAuditAndEvidence(t *testing.T) {
 	}
 	if code, _ := do(t, srv, "POST", "/api/v1/blockchain/anchor", `{"contract":"0x123"}`, nil); code != 400 && code != 500 {
 		t.Fatalf("anchor invalid: %d", code)
+	}
+}
+
+func TestEvidenceBlobStorage(t *testing.T) {
+	srv := newTestServer(t)
+	rel := createRelease(t, srv, "")
+	code, env := do(t, srv, "POST", "/api/v1/verifications", fmt.Sprintf(`{"releaseId":%q,"evidence":%s}`, rel, agreeEvidence()), nil)
+	if code != 201 {
+		t.Fatalf("seed: %d", code)
+	}
+	vid := mustData[map[string]any](t, env)["id"].(string)
+	payload := "artifact attestation payload-12345"
+	b64 := base64.StdEncoding.EncodeToString([]byte(payload))
+	sum := sha256.Sum256([]byte(payload))
+	expected := hex.EncodeToString(sum[:])
+	code, env = do(t, srv, "POST", "/api/v1/evidence", fmt.Sprintf(`{"verificationId":%q,"kind":"attestation","sha256":%q,"data":%q}`, vid, expected, b64), nil)
+	if code != 201 {
+		t.Fatalf("put evidence: %d %v", code, env.Error)
+	}
+	evObj := mustData[map[string]any](t, env)
+	eid := evObj["id"].(string)
+	if evObj["sha256"] != expected || !strings.HasPrefix(evObj["storageKey"].(string), "sha256/") {
+		t.Fatalf("bad evidence object: %s", env.Data)
+	}
+	if code, env := do(t, srv, "POST", "/api/v1/evidence", fmt.Sprintf(`{"verificationId":%q,"kind":"attestation","sha256":%q,"data":%q}`, vid, strings.Repeat("1", 64), b64), nil); code != 400 || env.Error.Code != "INVALID_INPUT" {
+		t.Fatalf("sha mismatch: %d %v", code, env.Error)
+	}
+	if code, _ := do(t, srv, "POST", "/api/v1/evidence", `{"kind":"x"}`, nil); code != 400 {
+		t.Fatalf("missing fields: %d", code)
+	}
+	req := httptest.NewRequest("GET", "/api/v1/evidence/"+eid+"/blob", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != 200 || rec.Body.String() != payload {
+		t.Fatalf("blob: %d %q", rec.Code, rec.Body.String())
+	}
+	if code, env := do(t, srv, "GET", "/api/v1/evidence/ev_nope/blob", "", nil); code != 404 || env.Error.Code != "EVIDENCE_NOT_FOUND" {
+		t.Fatalf("blob 404: %d %v", code, env.Error)
 	}
 }

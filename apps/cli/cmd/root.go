@@ -23,6 +23,7 @@ never proof that software is safe.`,
 	root.PersistentFlags().Bool("verbose", false, "diagnostic output")
 
 	root.AddCommand(newVerifyCmd())
+	root.AddCommand(newAttestCmd())
 	root.AddCommand(newPolicyCmd())
 	root.AddCommand(newBuildersCmd())
 	root.AddCommand(newEvidenceCmd())

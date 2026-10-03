@@ -111,6 +111,9 @@ func TestPostgresIntegration(t *testing.T) {
 	}
 
 	// Job queue: enqueue (idempotent), claim, complete, lease expiry.
+	if err := pg.DeleteAllJobs(ctx); err != nil {
+		t.Fatalf("cleanup jobs: %v", err)
+	}
 	if _, err := pg.UpsertBuilder(ctx, store.Builder{ID: "pg-builder-a-" + uniq, IndependenceGroup: "cloud-a"}); err != nil {
 		t.Fatal(err)
 	}

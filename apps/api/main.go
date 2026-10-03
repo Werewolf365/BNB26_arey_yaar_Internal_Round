@@ -10,6 +10,7 @@ import (
 
 	"github.com/quorum/quorum/apps/api/internal/server"
 	"github.com/quorum/quorum/apps/api/internal/store"
+	"github.com/quorum/quorum/services/storage"
 )
 
 func main() {
@@ -34,7 +35,15 @@ func main() {
 	} else {
 		log.Printf("QUORUM_DATABASE_URL unset: using in-memory store (dev/test only)")
 	}
-	srv := &http.Server{Addr: addr, Handler: server.New(st), ReadHeaderTimeout: 5 * time.Second}
+	blobDir := os.Getenv("QUORUM_BLOB_DIR")
+	if blobDir == "" {
+		blobDir = "./data/evidence"
+	}
+	blobs, err := storage.NewFilesystem(blobDir)
+	if err != nil {
+		log.Fatalf("storage: %v", err)
+	}
+	srv := &http.Server{Addr: addr, Handler: server.New(st, blobs), ReadHeaderTimeout: 5 * time.Second}
 	log.Printf("quorum api listening on %s", addr)
 	log.Fatal(srv.ListenAndServe())
 }

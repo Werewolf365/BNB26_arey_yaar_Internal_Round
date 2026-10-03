@@ -8,7 +8,7 @@ import (
 )
 
 func TestBuildJobs(t *testing.T) {
-	srv := newTestServer()
+	srv := newTestServer(t)
 	rel := createRelease(t, srv, "")
 	do(t, srv, "POST", "/api/v1/builders", `{"id":"builder-a","independenceGroup":"cloud-a"}`, nil)
 	do(t, srv, "POST", "/api/v1/builders", `{"id":"builder-b","independenceGroup":"cloud-b"}`, nil)
@@ -96,7 +96,7 @@ func TestBuildJobs(t *testing.T) {
 }
 
 func TestBuildJobsFailurePath(t *testing.T) {
-	srv := newTestServer()
+	srv := newTestServer(t)
 	rel := createRelease(t, srv, "")
 	do(t, srv, "POST", "/api/v1/builders", `{"id":"builder-a","independenceGroup":"cloud-a"}`, nil)
 	code, env := do(t, srv, "POST", "/api/v1/verifications", fmt.Sprintf(`{"releaseId":%q,"evidence":%s}`, rel, agreeEvidence()), nil)

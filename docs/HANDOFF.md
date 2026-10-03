@@ -1,51 +1,41 @@
-# QUORUM — Agent handoff / mid-refactor state
+# QUORUM — Agent handoff / current state
 
-> Read this before touching code in this working tree.
-> Last stable commit: `ead8dca` (all suites green; `go build ./...` clean).
+> Updated after the interrupted Sigstore/storage session was resumed and fixed.
 
-## What the previous session was doing
+## Stable points
 
-Continuing the master plan in order: workers done (`23ffdc0`), OSS Rebuild
-live path done (`ead8dca`), then **Sigstore/Cosign phase** and **object
-storage wiring** were in progress when the session stopped. It also picked up
-two hygiene items en route (JSON error envelopes on stderr, enforced by
-`emitErr`; and this handoff doc).
+- `ead8dca` — last full green before the Sigstore/storage work began.
+- The working tree now ALSO contains a **complete and tested** Sigstore slice and
+  a **complete and tested** storage slice (both below). Commit pending verification.
 
-## Precise state of the uncommitted leftovers
-
-All below is **uncommitted**. `git status` shows:
-`M server.go, M root.go, ?? attest.go, ?? attest_test.go, ?? services/sigstore/, ?? services/storage/`.
+## Pieces landed since `ead8dca` (all tests green)
 
 | Piece | Status | Evidence |
 |---|---|---|
-| `services/sigstore/sigstore.go` + transparency log | **Complete, tested** | `go test ./services/sigstore/` ok — P-256 keys, DSSE sign/verify, policy checks (digest/commit prefix-normalized, builder allowlist), PEM round-trips, file transparency log tamper tests |
-| `apps/cli/cmd/attest.go` (+`root.go` wiring) + test | **Complete, tested** | `go test ./apps/cli/cmd/` ok — `attest genkey`/`sign`/`verify` round-trip plus wrong-key/digest/commit/builder/missing-flags/malformed cases; binary path verified manually |
-| `services/storage/storage.go` + tests | **Complete, tested** | `go test ./services/storage/` ok — content-addressed FS store, traversal/shape caps, O_EXCL+rename, concurrent-put retry (Windows), on-disk tamper detection |
-| `apps/api/internal/server/server.go` storage wiring | **INCOMPLETE, breaks build** | `New` signature changed to `(st, blobs)`, `blobs` field + storage import added, but callers (`apps/api/main.go`, `server_test.go`) still pass one arg; also a stale import of `github.com/quorum/quorum/apps/cli/internal/runner` (moved to `internal/runner`) remains. `go build ./...` currently fails only here. |
+| `services/sigstore` (DSSE + in-toto + SLSA v1.2, P-256 keys, policy verify, dev transparency log) | Complete, tested | `go test ./services/sigstore/` ok |
+| `quorum attest genkey|sign|verify` (+ root wiring, envelope JSON error codes) | Complete, tested | `go test ./apps/cli/cmd/` ok incl. `attest_test.go` matrix |
+| `services/storage` (content-addressed FS: traversal guards, size caps, atomic EXCL rename, concurrent-put, on-read hash verify) | Complete, tested | `go test ./services/storage/` ok |
+| Storage wired into API (`POST /api/v1/evidence` base64 upload, metadata in store, `GET /api/v1/evidence/:id/blob` hash-verified raw download, `PUT /evidence` rejects sha mismatch) | Complete, tested | `go test ./apps/api/...` ok incl. `TestEvidenceBlobStorage`; Postgres integration `QUORUM_TEST_POSTGRES=1` ok |
 
-## Intended (not done) — resume checklist
+## Prior breakage, now resolved
 
-1. Finish the storage wiring: fix/replace the stale runner import in
-   `server.go`; construct the `storage.Filesystem` backend in `apps/api/main.go`
-   (default `./data/evidence`); pass it to `server.New(st, blobs)`; update
-   `server_test.go`'`newTestServer()`; persist submitted evidence blobs via
-   `POST /api/v1/evidence` and serve them back hash-verified via
-   `GET /api/v1/evidence/:id` (+ an HTTP blob download route if wanted).
-2. Remove the `services/attestation/dsse.mjs` test-key scaffolding from the
-   trust path once sigstore is the single implementation; keep the Node mirror
-   only if it stays conformance-locked.
-3. Remaining roadmap unchanged (Sigstore transparency-in-production,
-   dashboard, hardening, coverage gate, final demo/report).
+`apps/api/internal/server/server.go` was left half-edited (stale
+`apps/cli/internal/runner` import, `New(st,blobs)` signature without blobs
+field assignment, 1-arg callers in main/tests, missing storage import for
+`storage.NewFilesystem`). All fixed: stale import corrected, struct literal
+now passes `blobs`, `main.go` builds a `storage.Filesystem` from
+`QUORUM_BLOB_DIR` (default `./data/evidence`), tests use a temp-dir store
+via `newTestServer(t)`, new `TestEvidenceBlobStorage` covers put → metadata →
+blob round-trip + sha-mismatch + 400 paths.
 
-## Verify a fresh checkout at HEAD (no leftover code)
+Also hardened earlier: `--json` CLI errors now emit `{"error":...}` on stderr
+(never stdout, never silence); `emitErr` centralizes this in `cmd/output.go`.
 
-```powershell
-git stash -u            # or: git checkout -- . + rm untracked dirs
-node scripts/doctor.js
-npm test                # 21/21
-go build ./...          # clean at ead8dca
-go test ./...           # all ok
-```
+## Remaining from the roadmap
 
-The leftover Sigstore + storage code passes its own tests standalone; it was
-only the half-edited `server.go` that could not compile. Nothing was pushed.
+1. Web dashboard (Next.js + Playwright).
+2. Real Cosign/Rekor adapter (current dev file log is intentionally NOT production).
+3. S3-compatible object storage backend config (Filesystem backend is live).
+4. Production hardening (auth/rate-limits/archive-sandbox/quotas/SBOM/signing/scans).
+5. Coverage gate 90%/95% (currently ~70–85% measured).
+6. Full demo + FINAL-REPORT + mutation/fuzz/chaos suites.

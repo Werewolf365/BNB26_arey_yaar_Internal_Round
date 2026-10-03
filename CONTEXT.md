@@ -35,9 +35,14 @@
 2. **OSS Rebuild live path** — DONE: real CLI adapter (`services/ossrebuild`,
    all six states) + `verify --oss-mode live` (live 4-group VERIFIED on
    `absl-py 2.0.0`). Fixture mode stays default for deterministic CI.
-3. **Sigstore/Cosign** — replace test keys; transparency + identity checks.
+3. **Sigstore/Cosign** — DONE (Slice): local ECDSA-P256 DSSE signing/verification,
+   provenance statement, identity/builder policy checks, dev transparency log,
+   `quorum attest` CLI + API metadata; real Cosign/Rekor adapter still future.
 4. **Web dashboard** — Next.js: releases/builders/policy/audit/evidence pages + Playwright suite.
-5. **Object storage wiring** — evidence blobs to S3-compat (content-addressed).
+5. **Object storage wiring** — DONE: content-addressed filesystem backend mounted
+   into the API (`POST /evidence` base64 upload, metadata rows in Postgres,
+   `GET /evidence/:id/blob` download hash-verified on every read). S3-compatible
+   rollout remains config.
 6. **Security hardening** — API auth, rate limits, archive sandbox, quotas, SBOM/signing, scans.
 7. **Coverage gate** — 90% overall / 95% critical (now 68–86%; REQ-016 PARTIAL).
 8. **Full demo + FINAL-REPORT** — 5 prompt scenarios, mutation/fuzz/chaos suites, `make test-all` green.

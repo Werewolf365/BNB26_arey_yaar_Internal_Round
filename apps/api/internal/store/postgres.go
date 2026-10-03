@@ -394,6 +394,12 @@ func (p *Postgres) PutEvidence(ctx context.Context, e EvidenceObject) (EvidenceO
 	return e, err
 }
 
+// DeleteAllJobs removes every queued/claimed job (test isolation helper).
+func (p *Postgres) DeleteAllJobs(ctx context.Context) error {
+	_, err := p.pool.Exec(ctx, `DELETE FROM build_jobs`)
+	return err
+}
+
 func (p *Postgres) GetEvidence(ctx context.Context, id string) (EvidenceObject, error) {
 	var e EvidenceObject
 	err := p.pool.QueryRow(ctx, `SELECT id, verification_id, kind, storage_key, sha256 FROM evidence_objects WHERE id=$1`, id).

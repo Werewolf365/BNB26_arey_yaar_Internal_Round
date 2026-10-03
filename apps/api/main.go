@@ -83,6 +83,11 @@ func main() {
 		blobs = fsblobs
 	}
 	cfg := server.ConfigFromEnv()
+	if len(cfg.CORSOrigins) == 0 {
+		// Local dashboard runs on Next.js (:3000); allow it for browser calls.
+		cfg.CORSOrigins = []string{"http://localhost:3000", "http://127.0.0.1:3000"}
+		log.Printf("QUORUM_CORS_ORIGINS unset: allowing http://localhost:3000 and http://127.0.0.1:3000")
+	}
 	if len(cfg.APIKeys) == 0 {
 		log.Printf("QUORUM_API_KEYS unset: admin writes are OPEN (local dev only — set keys before exposing)")
 	}

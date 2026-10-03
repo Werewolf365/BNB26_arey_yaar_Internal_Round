@@ -109,6 +109,10 @@ func (m *MemoryStore) CreateVerification(ctx context.Context, v Verification, ke
 	v.ID = newID("ver")
 	v.CreatedAt = time.Now().UTC()
 	m.verifs[v.ID] = v
+	if rel, ok := m.releases[v.ReleaseID]; ok {
+		rel.Status = v.Decision
+		m.releases[v.ReleaseID] = rel
+	}
 	if key != "" {
 		m.verKeys[key] = v.ID
 	}

@@ -180,6 +180,9 @@ func (p *Postgres) CreateVerification(ctx context.Context, v Verification, key s
 		v.ID, v.ReleaseID, v.PolicyID, v.Decision, v.Required, v.Satisfied, body, k, v.CreatedAt); err != nil {
 		return Verification{}, false, fmt.Errorf("OPERATIONAL: insert verification: %v", err)
 	}
+	if _, err := tx.Exec(ctx, `UPDATE releases SET status=$2 WHERE id=$1`, v.ReleaseID, v.Decision); err != nil {
+		return Verification{}, false, fmt.Errorf("OPERATIONAL: update release status: %v", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Verification{}, false, err
 	}

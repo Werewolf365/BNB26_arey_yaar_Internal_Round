@@ -21,3 +21,4 @@ sbom.syft.json
 sbom.sig
 apps/web/test-results/
 apps/web/playwright-report/
+sbom.bundle

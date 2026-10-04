@@ -107,15 +107,15 @@ func (p Provider) Probe(ctx context.Context) error {
 // SignBlob signs an artifact with an explicit key:
 // cosign sign-blob --key <keyRef> --output-signature <sigOut> --yes <blob>.
 // keyRef is a cosign key reference (file path, k8s://, or KMS URI).
-// bundleOut is optional: when non-empty, --output-bundle is also passed so
-// the Rekor transparency bundle is preserved alongside the signature.
+// bundleOut is optional: when non-empty, --bundle is also passed so the
+// Rekor transparency bundle is preserved alongside the signature.
 func (p Provider) SignBlob(ctx context.Context, keyRef, blobPath, sigOut, bundleOut string) Result {
 	if keyRef == "" || blobPath == "" || sigOut == "" {
 		return Result{State: StateInvalidInput, Detail: "INVALID_INPUT: key, blob and output-signature are required"}
 	}
 	args := []string{"sign-blob", "--key", keyRef, "--output-signature", sigOut, "--yes"}
 	if bundleOut != "" {
-		args = append(args, "--output-bundle", bundleOut)
+		args = append(args, "--bundle", bundleOut)
 	}
 	args = append(args, blobPath)
 	stdout, stderr, err := p.run(ctx, args...)

@@ -180,9 +180,10 @@ else {
 // --- phase 5: chain anchor (live Anvil when present) ---
 step("5/5 chain anchor");
 try {
-  const out = execSync("QUORUM_LIVE_ANVIL=1 go test -count=1 -run TestAnchorLive ./internal/runner/ 2>&1", { encoding: "utf8", timeout: 180000 });
-  /no test files|SKIP/i.test(out) || /ok\s/.test(out) ? ok("anchor suite (live or skipped with reason)") : fail("anchor suite failed");
-  if (/SKIP/.test(out)) skip("anvil/forge unavailable — anchor SKIPPED by policy");
+  const out = execSync("QUORUM_LIVE_ANVIL=1 go test -count=1 -v -run TestAnchorLive ./internal/runner/ 2>&1", { encoding: "utf8", timeout: 180000 });
+  if (/--- PASS: TestAnchorLive/.test(out)) ok("anchor suite LIVE (deploy + anchor + event + duplicate-revert)");
+  else if (/--- SKIP/.test(out)) skip(`anchor skipped: ${(out.match(/SKIP:?\s*([^\n]+)/) || [])[1] || "prerequisites absent"}`);
+  else fail("anchor suite failed");
 } catch (e) {
   const msg = String(e?.stdout || e?.message || e).slice(0, 200);
   skip(`anchor unavailable: ${msg.split("\n")[0]}`);

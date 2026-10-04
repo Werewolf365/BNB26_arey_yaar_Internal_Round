@@ -842,7 +842,9 @@ func (s *Server) handleGetAudit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleVerifyChain(w http.ResponseWriter, r *http.Request) {
-	recs, err := s.store.ListAudit(r.Context(), 500)
+	// Full table, never a newest-N window: a truncated window does not start
+	// at GENESIS, so verifying it would misreport a healthy long chain.
+	recs, err := s.store.ListAuditAll(r.Context())
 	if err != nil {
 		writeErr(w, r, err)
 		return

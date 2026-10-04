@@ -131,11 +131,12 @@ func TestLiveAttestRoundTrip(t *testing.T) {
 	os.WriteFile(blob, []byte("quorum-live-cosign-attest"), 0o600)
 	predicate := filepath.Join(dir, "predicate.json")
 	os.WriteFile(predicate, []byte(`{"live":"quorum-attest"}`), 0o600)
-	key := filepath.Join(dir, "cosign.key")
-	if out, err := exec.CommandContext(c, "cosign", "generate-key-pair", "--private-key", key).CombinedOutput(); err != nil {
+	keyPrefix := filepath.Join(dir, "cosign")
+	key := keyPrefix + ".key"
+	if out, err := exec.CommandContext(c, "cosign", "generate-key-pair", "--output-key-prefix", keyPrefix).CombinedOutput(); err != nil {
 		t.Skipf("keygen unavailable: %v\n%s", err, out)
 	}
-	pub := key + ".pub"
+	pub := keyPrefix + ".pub"
 	env := filepath.Join(dir, "live.bundle.json")
 	if r := p.AttestBlob(c, key, blob, predicate, "custom", env); r.State != qcosign.StateVerified {
 		t.Fatalf("live attest: %+v", r)

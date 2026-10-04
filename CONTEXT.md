@@ -208,10 +208,42 @@ this point.
   (deploy + anchor + event + duplicate-revert).
 - Separate gates, run individually (not covered by `test-all` by design):
   `make sbom` -> 166-entry module inventory (syft absent, honest fallback);
-  `make sign` -> explicit `[sign] SKIP: cosign absent` (fixed recipe that
-  previously swallowed its own SKIP behind a pipe); `make scan` green
-  (vet, govulncheck 0 vulns, npm audit web PASS, secret-grep PASS);
-  Playwright 14/14 vs live compose stack; live Rekor
+  `make scan` green (vet, govulncheck 0 vulns, npm audit web PASS,
+  secret-grep PASS); Playwright 14/14 vs live compose stack; live Rekor
   `TestLiveRekorLiveness` PASS + CLI `rekor-get` bogus UUID -> live
-  `NOT_FOUND` exit 1; live cosign sign/attest round-trips SKIP (no binary —
-  deterministic stub path covers the logic in `test-all`).
+  `NOT_FOUND` exit 1.
+- Cosign installed (v2.4.3, checksum-verified, `~/.local/bin`) — signing
+  gates now live, not skipped. The install exposed two real v1-vs-v2 flag
+  bugs, both fixed: `generate-key-pair --private-key` is gone upstream
+  (live tests now use `--output-key-prefix`) and `sign-blob
+  --output-bundle` never existed (adapter `SignBlob`, stub, and docs now
+  use the real `--bundle`; Quorum's own `--output-bundle` CLI flag name is
+  kept and mapped to `--bundle`). `TestLiveCosignRoundTrip` strengthened to
+  sign+verify WITH the Rekor bundle (inclusion checked against the real
+  log). Results: `TestLiveCosignRoundTrip` + `TestLiveAttestRoundTrip`
+  PASS; `make sign` signs `sbom.json` with a local dev key (never
+  committed), uploads tlog entry index 3075979141, verifies back
+  `Verified OK`; CLI `cosign-sign --output-bundle` -> `cosign-verify
+  --bundle` round-trip exit 0 (`cosign: signature verified`).
+
+## Change log — 2026-10-04: postgres chain-verification fix + honest integration gate
+
+- Root cause of `TestPostgresIntegration` "broken at 0": the shared compose
+  DB held 67 audit rows, so `ListAudit(50)` returned the 50 newest (ids
+  18–67), a window that does not start at GENESIS — verifying any
+  newest-N window as a chain misreports a healthy long chain. Same flaw in
+  `POST /audit/:id/verify-chain` (limit 500 is capped to 100 in Postgres).
+- Fix (no weakening — strictly stronger): new `Store.ListAuditAll`
+  (unbounded oldest-first; memory + postgres), `handleVerifyChain` and the
+  integration test now verify the FULL persisted table; test additionally
+  asserts the chain starts at GENESIS. Added `ListAuditAll` to the
+  `errorStore` test double + memory coverage. Full 67+-row chain verifies
+  (also proving JSONB payload round-trip stability).
+- `test-integration` no longer masks failures: daemon/compose genuinely down
+  -> SKIP exit 0; otherwise `go test` runs bare so a real failure returns
+  nonzero (in-test `t.Skip` still covers unreachable-DB honestly).
+- `make test-integration` PASS exit 0 (both suites ran, none skipped);
+  `make test-all` PASS exit 0. demo-e2e phase 5 now prints LIVE vs SKIPPED
+  explicitly (LIVE here). Remaining honest skips in this env: live OSS
+  Rebuild / testnet / S3 paths (env-gated, need creds/registry) and keyless
+  OIDC signing (interactive by nature).

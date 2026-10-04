@@ -235,6 +235,14 @@ func (m *MemoryStore) ListAudit(ctx context.Context, limit int) ([]AuditRecord, 
 	return out, nil
 }
 
+// ListAuditAll returns every record oldest-first; see Store docs — chain
+// verification must use this, never a newest-N window.
+func (m *MemoryStore) ListAuditAll(ctx context.Context) ([]AuditRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]AuditRecord(nil), m.audit...), nil
+}
+
 func (m *MemoryStore) PutAnchor(ctx context.Context, a Anchor) (Anchor, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

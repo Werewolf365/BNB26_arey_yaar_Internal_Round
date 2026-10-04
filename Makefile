@@ -52,9 +52,10 @@ run-api:
 	QUORUM_ADDR=:8080 QUORUM_DATABASE_URL=postgres://quorum:quorum@localhost:5433/quorum?sslmode=disable ./quorum-api
 
 test-integration:
-	@echo "[integration] needs Docker daemon for Postgres/Anvil; skipping gracefully if daemon down"
-	-@docker info > /dev/null 2>&1 && docker compose -f infra/compose/docker-compose.yml up -d postgres anvil || echo "[integration] SKIP: Docker daemon not running"
-	QUORUM_TEST_POSTGRES=1 QUORUM_LIVE_ANVIL=1 go test ./apps/api/... ./internal/runner/ -run 'TestPostgresIntegration|TestAnchorLive' || echo "[integration] SKIP: stack not reachable"
+	@echo "[integration] needs Docker daemon for Postgres/Anvil"
+	@docker info > /dev/null 2>&1 || { echo "[integration] SKIP: Docker daemon not running"; exit 0; }
+	@docker compose -f infra/compose/docker-compose.yml up -d postgres anvil || { echo "[integration] SKIP: compose stack unavailable"; exit 0; }
+	QUORUM_TEST_POSTGRES=1 QUORUM_LIVE_ANVIL=1 go test -count=1 ./apps/api/... ./internal/runner/ -run 'TestPostgresIntegration|TestAnchorLive'
 
 dev:
 	docker compose -f infra/compose/docker-compose.yml up --build
@@ -126,7 +127,12 @@ sbom:
 	node scripts/sbom.mjs
 
 sign: sbom
-	-@command -v cosign > /dev/null 2>&1 && cosign sign-blob --yes --output-signature sbom.sig sbom.json 2>&1 | tail -n 3 || echo "[sign] SKIP: cosign absent (install: https://docs.sigstore.dev/cosign/installation/)"
+	@COSIGN_KEY=$${QUORUM_COSIGN_KEY:-$$HOME/.config/quorum/cosign.key}; \
+	if ! command -v cosign >/dev/null 2>&1; then echo "[sign] SKIP: cosign absent (install: https://docs.sigstore.dev/cosign/installation/)"; exit 0; fi; \
+	if [ ! -f "$$COSIGN_KEY" ]; then mkdir -p $$(dirname "$$COSIGN_KEY"); COSIGN_PASSWORD=$${COSIGN_PASSWORD-} cosign generate-key-pair --output-key-prefix "$${COSIGN_KEY%.key}" && echo "[sign] generated dev key $$COSIGN_KEY (local dev only, never commit)"; fi; \
+	COSIGN_PASSWORD=$${COSIGN_PASSWORD-} cosign sign-blob --key "$$COSIGN_KEY" --output-signature sbom.sig --bundle sbom.bundle --yes sbom.json && \
+	COSIGN_PASSWORD=$${COSIGN_PASSWORD-} cosign verify-blob --key "$${COSIGN_KEY%.key}.pub" --signature sbom.sig --bundle sbom.bundle sbom.json && \
+	echo "[sign] sbom.json signed (sbom.sig) + Rekor bundle (sbom.bundle) + verified"
 
 scan:
 	node scripts/scan.mjs

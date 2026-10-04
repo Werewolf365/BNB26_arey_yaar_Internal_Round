@@ -362,6 +362,27 @@ func (p *Postgres) ListAudit(ctx context.Context, limit int) ([]AuditRecord, err
 	return out, nil
 }
 
+// ListAuditAll returns the whole table oldest-first; chain verification must
+// use this (see Store). No LIMIT clause — every record is covered.
+func (p *Postgres) ListAuditAll(ctx context.Context) ([]AuditRecord, error) {
+	rows, err := p.pool.Query(ctx, `SELECT id, event_type, payload, verification_id, previous_hash, record_hash, created_at FROM audit_records ORDER BY id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []AuditRecord{}
+	for rows.Next() {
+		var r AuditRecord
+		var payload []byte
+		if err := rows.Scan(&r.ID, &r.EventType, &payload, &r.VerificationID, &r.PreviousHash, &r.RecordHash, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(payload, &r.Payload)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 func (p *Postgres) PutAnchor(ctx context.Context, a Anchor) (Anchor, error) {
 	var exists bool
 	if err := p.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM verifications WHERE id=$1)`, a.VerificationID).Scan(&exists); err != nil || !exists {

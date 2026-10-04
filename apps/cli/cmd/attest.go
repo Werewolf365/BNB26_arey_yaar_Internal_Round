@@ -239,7 +239,7 @@ func newCosignSignCmd() *cobra.Command {
 	c.Flags().String("artifact", "", "artifact file to sign")
 	c.Flags().String("key", "", "cosign key reference (file path, k8s:// or KMS URI)")
 	c.Flags().String("output-signature", "", "signature output path")
-	c.Flags().String("output-bundle", "", "rekor bundle output path (optional, preserves transparency evidence)")
+	c.Flags().String("output-bundle", "", "rekor bundle output path (optional, passed as --bundle to cosign; preserves transparency evidence)")
 	c.Flags().String("cosign-bin", "", "cosign executable (default: PATH lookup)")
 	return c
 }

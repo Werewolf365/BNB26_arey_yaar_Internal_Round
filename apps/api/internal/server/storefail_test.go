@@ -57,6 +57,9 @@ func (e errorStore) AppendAudit(ctx context.Context, ev string, p map[string]any
 func (e errorStore) ListAudit(ctx context.Context, n int) ([]store.AuditRecord, error) {
 	return nil, e.err
 }
+func (e errorStore) ListAuditAll(ctx context.Context) ([]store.AuditRecord, error) {
+	return nil, e.err
+}
 func (e errorStore) PutAnchor(ctx context.Context, a store.Anchor) (store.Anchor, error) {
 	return store.Anchor{}, e.err
 }

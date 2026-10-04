@@ -191,17 +191,21 @@ func TestLiveCosignRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	blob := filepath.Join(dir, "live.bin")
 	os.WriteFile(blob, []byte("quorum-live-cosign"), 0o600)
-	key := filepath.Join(dir, "cosign.key")
-	if out, err := exec.CommandContext(c, "cosign", "generate-key-pair", "--private-key", key).CombinedOutput(); err != nil {
+	prefix := filepath.Join(dir, "cosign")
+	key := prefix + ".key"
+	if out, err := exec.CommandContext(c, "cosign", "generate-key-pair", "--output-key-prefix", prefix).CombinedOutput(); err != nil {
 		t.Skipf("keygen unavailable: %v\n%s", err, out)
 	}
-	pub := key + ".pub"
+	pub := prefix + ".pub"
 	sig := filepath.Join(dir, "live.sig")
-	if r := p.SignBlob(c, key, blob, sig, ""); r.State != qcosign.StateVerified {
+	bundle := filepath.Join(dir, "live.bundle.json")
+	if r := p.SignBlob(c, key, blob, sig, bundle); r.State != qcosign.StateVerified {
 		t.Fatalf("live sign: %+v", r)
 	}
-	if r := p.VerifyBlob(c, pub, blob, sig, ""); r.State != qcosign.StateVerified {
-		t.Fatalf("live verify: %+v", r)
+	// Verify with the Rekor bundle: the CLI checks transparency inclusion
+	// against the real log, not just the key.
+	if r := p.VerifyBlob(c, pub, blob, sig, bundle); r.State != qcosign.StateVerified {
+		t.Fatalf("live verify (rekor bundle): %+v", r)
 	}
 }
 

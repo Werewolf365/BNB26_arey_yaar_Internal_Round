@@ -108,6 +108,14 @@ type Store interface {
 	PutEvidence(ctx context.Context, e EvidenceObject) (EvidenceObject, error)
 	GetEvidence(ctx context.Context, id string) (EvidenceObject, error)
 
+	// ListAuditAll returns the complete table oldest-first with no limit.
+	// Chain verification MUST use this: ListAudit(limit) returns a newest-N
+	// window that does not start at GENESIS, so VerifyChain over a window
+	// reports a healthy long chain as broken (or, worse, ok:true over a
+	// partial chain). Unbounded by design — audit tables are small and
+	// verification must cover every record.
+	ListAuditAll(ctx context.Context) ([]AuditRecord, error)
+
 	// Build-job queue (orchestrator + workers).
 	EnqueueJobs(ctx context.Context, verificationID string, builderIDs []string) ([]BuildJob, error)
 	ListJobs(ctx context.Context, verificationID string) ([]BuildJob, error)

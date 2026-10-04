@@ -49,7 +49,7 @@ func flag(args []string, name string) string {
 func runSign(args []string) {
 	key := flag(args, "--key")
 	sigOut := flag(args, "--output-signature")
-	bundleOut := flag(args, "--output-bundle")
+	bundleOut := flag(args, "--bundle")
 	blob := ""
 	for _, a := range args {
 		if !strings.HasPrefix(a, "-") {

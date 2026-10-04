@@ -78,6 +78,18 @@ func TestMemoryStoreCRUD(t *testing.T) {
 	if ok, _, _ := store.VerifyChain(recs); !ok {
 		t.Fatal("chain must verify")
 	}
+	// ListAuditAll covers the whole table oldest-first: the chain primitive
+	// for verification and export (a newest-N window is not verifiable).
+	all, err := m.ListAuditAll(ctx)
+	if err != nil || len(all) != len(recs) {
+		t.Fatalf("list all audit: %v", err)
+	}
+	if all[0].PreviousHash != "GENESIS" {
+		t.Fatal("full chain must start at GENESIS")
+	}
+	if ok, _, _ := store.VerifyChain(all); !ok {
+		t.Fatal("full chain must verify")
+	}
 	if _, err := m.PutAnchor(ctx, store.Anchor{VerificationID: v.ID, TxHash: "0x1"}); err != nil {
 		t.Fatal(err)
 	}

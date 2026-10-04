@@ -90,8 +90,19 @@ func TestPostgresIntegration(t *testing.T) {
 	if err != nil || len(recs) == 0 {
 		t.Fatal("list audit")
 	}
-	if ok, at, _ := store.VerifyChain(recs); !ok {
-		t.Fatalf("persisted chain must verify (broken at %d)", at)
+	// Chain verification covers the FULL persisted table (ListAuditAll):
+	// ListAudit(limit) returns a newest-N window that does not start at
+	// GENESIS, so verifying a window misreports a healthy long chain.
+	// This asserts strictly more than the old window check.
+	all, err := pg.ListAuditAll(ctx)
+	if err != nil || len(all) < len(recs) {
+		t.Fatalf("list all audit: %v (%d < %d window)", err, len(all), len(recs))
+	}
+	if all[0].PreviousHash != "GENESIS" {
+		t.Fatal("full chain must start at GENESIS")
+	}
+	if ok, at, reason := store.VerifyChain(all); !ok {
+		t.Fatalf("persisted chain must verify (broken at %d: %s)", at, reason)
 	}
 	if _, err := pg.PutAnchor(ctx, store.Anchor{VerificationID: ver.ID, TxHash: "0xabc", ChainID: "0x7a69", ContractAddress: "0x5FbDB2315678afecb367f032d93F642f64180aa3", EventFound: true}); err != nil {
 		t.Fatal(err)

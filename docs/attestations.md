@@ -8,9 +8,11 @@
 - Slice 1 uses **local test keys** with real signing/verification (no custom crypto,
   no custom envelope). Production integrates **Sigstore/Cosign** (blob sign/verify,
   in-toto attestation support) with signer-identity + transparency checks.
-- **Cosign adapter (live): `services/cosign/`** shells the real `cosign` CLI.
+- **Cosign adapter (live): `services/cosign/`** shells the real `cosign` CLI
+  (validated against v2.4.3; note v1-era `--private-key` for `generate-key-pair`
+  is gone upstream — use `--output-key-prefix`, as the live tests do).
   Blob sign/verify pins explicit keys: `SignBlob` (`sign-blob --key
-  --output-signature [--output-bundle] --yes`), `VerifyBlob` (`verify-blob
+  --output-signature [--bundle] --yes`), `VerifyBlob` (`verify-blob
   --key --signature [--bundle]`) with states `VERIFIED / SIGNATURE_INVALID /
   UNAVAILABLE / INVALID_INPUT`. A missing binary or timeout is `UNAVAILABLE`
   with an install hint — never a faked verdict. `attest cosign-sign |

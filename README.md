@@ -17,7 +17,8 @@ fixture + live adapters, content-addressed storage (fs + S3-compat),
 `QuorumAnchor.sol` (hash-only) + Anvil flow, audit hash chain, Next.js 15
 dashboard (overview + releases/builders/policies/audit/evidence +
 verification detail with counted/excluded/conflicts + Playwright suite
-14/14), full `make demo` E2E, SBOM/signing/scans, mutation gate (6/6 killed),
+14/14), full `make demo` E2E, XZ Utils showcase (`make demo-real` +
+`docs/demo-real.md` runbook), SBOM/signing/scans, mutation gate (6/6 killed),
 Docker Compose one-command stack, CI (+ security/mutation/fuzz/web jobs).
 
 Not yet: remote/fleet builders, public testnet deployment, quotas beyond
@@ -62,7 +63,7 @@ quorum policy eval (`VERIFIED` / `VERIFIED_WITH_CONFLICT` / `REJECTED` /
 - `contracts/src/QuorumAnchor.sol` — hash-only anchor + `VerificationAnchored` event; `test/QuorumAnchor.t.sol`
 - `packages/schemas/` + `packages/fixtures/conformance.json` — JSON schemas + Go/Node vectors
 - `infra/compose/docker-compose.yml` — postgres + S3 (LocalStack) + Anvil; `infra/docker/builder.Dockerfile`
-- `scripts/` — `doctor.js` (detect-only), `slice1-demo.mjs` (3 scenarios), `demo-e2e.mjs` (full E2E: CLI→API→quorum→audit→chain), `coverage.mjs` (90/95 gates), `mutate.mjs` (engine mutation gate), `sbom.mjs`, `scan.mjs`
+- `scripts/` — `doctor.js` (detect-only), `slice1-demo.mjs` (3 scenarios), `demo-e2e.mjs` (full E2E: CLI→API→quorum→audit→chain), `demo-real.mjs` (XZ v5.8.1 showcase: pinned release, 3 isolated rebuilds, conflict, anchor), `coverage.mjs` (90/95 gates), `mutate.mjs` (engine mutation gate), `sbom.mjs`, `scan.mjs`
 - `fixtures/` — `tiny-package/`, `conflicting-builders/`, `mismatch/`
 - `docs/` — architecture, api, cli, blockchain, demo, limitations, testing matrices, HANDOFF
 
@@ -89,6 +90,8 @@ go build -o quorum ./apps/cli && ./quorum verify --repo https://github.com/examp
 ```
 
 `make` wraps the same: `make doctor/test/demo/test-all/coverage/lint`.
+Showcase: `make demo-real` with presenter runbook `docs/demo-real.md`
+(XZ Utils v5.8.1 pinned, 3 isolated rebuilds, conflict, Anvil anchor).
 `make setup` installs project deps only — never your OS toolchain.
 
 ## Full stack with Docker (one command)

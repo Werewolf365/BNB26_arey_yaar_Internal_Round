@@ -26,6 +26,8 @@ help:
 	@echo "  make coverage         - coverage report"
 	@echo "  make demo             - full end-to-end demo: CLI -> API -> quorum -> audit (-> Anvil when present)"
 	@echo "  make demo-slice       - repeatable Slice-1 demo (valid/tampered/conflict)"
+	@echo "  make demo-real PROJECT=x  - real-project showcase (or REPO=/COMMIT=/TAG=… overrides)"
+	@echo "  make demo-list          - list available demo project configs"
 	@echo "  make fuzz             - short property fuzz runs (quorum invariants + canonical stability)"
 	@echo "  make mutation         - mutation gate: every engine mutant must be killed by tests"
 	@echo "  make sbom             - SBOM (syft CycloneDX when installed, else Go/npm inventory)"
@@ -113,6 +115,12 @@ demo:
 
 demo-slice:
 	node scripts/slice1-demo.mjs
+
+demo-real:
+	node scripts/demo-real.mjs $(if $(PROJECT),--project $(PROJECT)) $(if $(REPO),--repo $(REPO)) $(if $(COMMIT),--commit $(COMMIT)) $(if $(TAG),--tag $(TAG)) $(if $(PACKAGE),--package $(PACKAGE)) $(if $(ECOSYSTEM),--ecosystem $(ECOSYSTEM)) $(if $(NAME),--name $(NAME)) $(if $(VERSION),--version $(VERSION))
+
+demo-list:
+	node scripts/demo-real.mjs --list
 
 fuzz:
 	go test -count=1 -fuzz FuzzEvaluateDeterminism -fuzztime 20s ./services/policy/

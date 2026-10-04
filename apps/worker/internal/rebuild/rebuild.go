@@ -47,6 +47,16 @@ func FetchCommit(ctx context.Context, gitBin, parent, repoURL, commit string) (s
 	}
 	for _, args := range steps {
 		cmd := exec.CommandContext(ctx, gitBin, append([]string{"-C", dir}, args...)...)
+		// Non-interactive, bounded fetches: a public repo must never trigger
+		// a credential prompt (observed: GitHub username prompt on failed
+		// SHA fetch). With prompting disabled the failure surfaces as an
+		// error immediately instead of hanging a headless worker.
+		cmd.Env = append(os.Environ(),
+			"GIT_TERMINAL_PROMPT=0",
+			"GIT_CONFIG_COUNT=1",
+			"GIT_CONFIG_KEY_0=credential.helper",
+			"GIT_CONFIG_VALUE_0=",
+		)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		if err := cmd.Run(); err != nil {
@@ -98,7 +108,14 @@ func DockerArchiveDigest(ctx context.Context, dockerBin, image, repoDir, commit 
 	if err != nil {
 		return "", fmt.Errorf("INVALID_INPUT: %v", err)
 	}
-	script := fmt.Sprintf("git -C /src archive %s | sha256sum", commit)
+	// NOTE: the `&&` chain is load-bearing (and POSIX, unlike pipefail which
+	// dash rejects). A bare `git ... | sha256sum` reports only sha256sum's
+	// status, so a failing git would hash empty stdin and every builder
+	// would "agree" on sha256(e3b0c44…) — a fake unanimous quorum. With `&&`
+	// any git failure fails the rebuild loudly instead.
+	// safe.directory is scoped to this one-shot invocation over our own
+	// read-only fetch (bind mounts trip git's dubious-ownership guard).
+	script := fmt.Sprintf("git -c safe.directory=/src -C /src archive %s > /tmp/quorum-archive.tar && sha256sum /tmp/quorum-archive.tar", commit)
 	cmd := exec.CommandContext(ctx, dockerBin, "run", "--rm", "--network", "none",
 		"-v", abs+":/src:ro", image, "sh", "-c", script)
 	var stdout, stderr bytes.Buffer

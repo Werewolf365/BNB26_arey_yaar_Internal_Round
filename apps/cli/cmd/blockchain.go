@@ -61,7 +61,43 @@ and independently verify the VerificationAnchored event. With --required=false
 	anchor.Flags().String("decision", "VERIFIED", "VERIFIED|VERIFIED_WITH_CONFLICT|INSUFFICIENT_EVIDENCE|REJECTED|INVESTIGATE|ERROR")
 	anchor.Flags().String("from", "", "sender (default: Anvil account 0)")
 	anchor.Flags().Bool("required", false, "BLOCKCHAIN_REQUIRED=true: fail when chain is unreachable")
-	b.AddCommand(anchor)
+	verify := &cobra.Command{
+		Use:   "verify --contract ADDR --verification-id H",
+		Short: "Independently re-read an anchor (no transaction submitted)",
+		Long: `Read-only: eth_call anchored(id) for contract state plus eth_getLogs
+for the VerificationAnchored event (tx hash and block). Exit 0 when anchored,
+exit 1 when the id is not anchored, 4 on operational failure.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rpc, _ := cmd.Flags().GetString("rpc")
+			contract, _ := cmd.Flags().GetString("contract")
+			vid, _ := cmd.Flags().GetString("verification-id")
+			if contract == "" || vid == "" {
+				emitErr(cmd, "--contract and --verification-id are required")
+				return &exitErr{code: exitcodes.InvalidInput}
+			}
+			read, err := runner.ReadAnchor(rpc, contract, vid, 0)
+			if err != nil {
+				emitErr(cmd, err.Error())
+				if isInputErr(err) {
+					return &exitErr{code: exitcodes.InvalidInput}
+				}
+				return &exitErr{code: exitcodes.Operational}
+			}
+			human := fmt.Sprintf("anchored: %v chain=%s tx=%s block=%s event=%v\n",
+				read.Anchored, read.ChainID, read.TxHash, read.BlockNumber, read.EventFound)
+			if err := emit(cmd, human, read); err != nil {
+				return &exitErr{code: exitcodes.Operational}
+			}
+			if !read.Anchored {
+				return &exitErr{code: exitcodes.Rejected}
+			}
+			return nil
+		},
+	}
+	verify.Flags().String("rpc", "http://127.0.0.1:8545", "EVM RPC endpoint")
+	verify.Flags().String("contract", "", "anchor contract address")
+	verify.Flags().String("verification-id", "", "bytes32 verification id (0x..)")
+	b.AddCommand(anchor, verify)
 	return b
 }
 

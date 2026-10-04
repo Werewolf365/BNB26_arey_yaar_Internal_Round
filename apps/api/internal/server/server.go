@@ -4,6 +4,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
@@ -74,6 +75,7 @@ func NewWithConfig(st store.Store, blobs storage.Backend, cfg Config) *Server {
 	s.mux.HandleFunc("POST /api/v1/audit/{id}/verify-chain", s.handleVerifyChain)
 
 	s.mux.HandleFunc("POST /api/v1/blockchain/anchor", s.handleAnchor)
+	s.mux.HandleFunc("GET /api/v1/blockchain/lookup/{verificationId}", s.handleLookupAnchor)
 	s.mux.HandleFunc("GET /api/v1/blockchain/{verificationId}", s.handleGetAnchor)
 
 	s.mux.HandleFunc("POST /api/v1/verifications/{id}/jobs", s.handleEnqueueJobs)
@@ -505,7 +507,10 @@ func (s *Server) handleCompleteJob(w http.ResponseWriter, r *http.Request) {
 	}
 	signatureValid := false
 	attestation := string(in.Attestation)
-	if in.OK && len(in.Attestation) > 0 {
+	// An explicit JSON null carries no attestation (the worker sends
+	// `"attestation": null` when run without --signing-key); treat it exactly
+	// like an omitted field so unsigned completions stay completable.
+	if in.OK && len(bytes.TrimSpace(in.Attestation)) > 0 && string(bytes.TrimSpace(in.Attestation)) != "null" {
 		job, err := s.store.GetJob(r.Context(), r.PathValue("id"))
 		if err != nil {
 			writeErr(w, r, err)
@@ -911,4 +916,21 @@ func (s *Server) handleGetAnchor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, r, 200, a)
+}
+
+// handleLookupAnchor is read-only: it re-reads contract state + event logs
+// through the given RPC endpoint and submits nothing. Both rpc and contract
+// are required query params so the caller always states what is being read.
+func (s *Server) handleLookupAnchor(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if q.Get("rpc") == "" || q.Get("contract") == "" {
+		writeErr(w, r, fmt.Errorf("INVALID_INPUT: rpc and contract query params are required"))
+		return
+	}
+	read, err := runner.ReadAnchor(q.Get("rpc"), q.Get("contract"), r.PathValue("verificationId"), 0)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	writeJSON(w, r, 200, read)
 }

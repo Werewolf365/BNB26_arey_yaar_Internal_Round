@@ -39,6 +39,78 @@ type AnchorResult struct {
 	Reason      string `json:"reason,omitempty"`
 }
 
+// AnchorRead is the machine-readable outcome of an independent on-chain
+// re-read: contract state plus the anchoring transaction found via logs.
+// No transaction is submitted — this is the "don't trust, verify" half.
+type AnchorRead struct {
+	Anchored    bool   `json:"anchored"`
+	ChainID     string `json:"chainId,omitempty"`
+	Contract    string `json:"contract,omitempty"`
+	TxHash      string `json:"txHash,omitempty"`
+	BlockNumber string `json:"blockNumber,omitempty"`
+	EventFound  bool   `json:"eventFound,omitempty"`
+}
+
+// ReadAnchor independently re-reads an anchor: eth_call anchored(id) for
+// contract state, eth_chainId for the network, and eth_getLogs for the
+// VerificationAnchored event (which yields the tx hash and block). Read-only.
+func ReadAnchor(rpcURL, contract, verificationID string, timeout time.Duration) (*AnchorRead, error) {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	if rpcURL == "" {
+		rpcURL = "http://127.0.0.1:8545"
+	}
+	caddr, err := parseAddress(contract, "contract")
+	if err != nil {
+		return nil, err
+	}
+	vid, err := parseBytes32(verificationID, "verification-id")
+	if err != nil {
+		return nil, err
+	}
+	chainRaw, err := rpcCall(rpcURL, "eth_chainId", []any{}, timeout)
+	if err != nil {
+		return nil, fmt.Errorf("BLOCKCHAIN_UNAVAILABLE: %v", err)
+	}
+	var chainID string
+	_ = json.Unmarshal(chainRaw, &chainID)
+	// anchored(bytes32) -> bool.
+	sel := keccak256Hex([]byte("anchored(bytes32)"))[:8]
+	callData := "0x" + sel + fmt.Sprintf("%x", vid)
+	stateRaw, err := rpcCall(rpcURL, "eth_call", []any{map[string]string{"to": caddr, "data": callData}, "latest"}, timeout)
+	if err != nil {
+		return nil, fmt.Errorf("BLOCKCHAIN_UNAVAILABLE: eth_call: %v", err)
+	}
+	var stateHex string
+	_ = json.Unmarshal(stateRaw, &stateHex)
+	anchored := len(stateHex) > 0 && stateHex[len(stateHex)-1] != '0'
+	read := &AnchorRead{Anchored: anchored, ChainID: chainID, Contract: caddr}
+	if !anchored {
+		return read, nil
+	}
+	// Find the anchoring transaction via the indexed verificationId topic.
+	eventSig := "0x" + keccak256Hex([]byte("VerificationAnchored(bytes32,bytes32,bytes32,bytes32,bytes32,uint8,uint256)"))
+	logsRaw, err := rpcCall(rpcURL, "eth_getLogs", []any{map[string]any{
+		"fromBlock": "0x0", "toBlock": "latest", "address": caddr,
+		"topics": []string{eventSig, "0x" + fmt.Sprintf("%x", vid)},
+	}}, timeout)
+	if err != nil {
+		return nil, fmt.Errorf("BLOCKCHAIN_UNAVAILABLE: eth_getLogs: %v", err)
+	}
+	var logs []struct {
+		TransactionHash string `json:"transactionHash"`
+		BlockNumber     string `json:"blockNumber"`
+	}
+	_ = json.Unmarshal(logsRaw, &logs)
+	if len(logs) > 0 {
+		read.EventFound = true
+		read.TxHash = logs[0].TransactionHash
+		read.BlockNumber = logs[0].BlockNumber
+	}
+	return read, nil
+}
+
 func keccak256Hex(data []byte) string {
 	h := sha3.NewLegacyKeccak256()
 	h.Write(data)

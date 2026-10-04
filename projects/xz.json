@@ -1,0 +1,20 @@
+{
+  "name": "xz",
+  "description": "XZ Utils v5.8.1 — pinned source-archive reproducibility showcase",
+  "repo": "https://github.com/tukaani-project/xz.git",
+  "webRepo": "https://github.com/tukaani-project/xz",
+  "tag": "v5.8.1",
+  "commit": "a522a226545730551f7e7c2685fab27cf567746c",
+  "package": "xz",
+  "ecosystem": "c",
+  "version": "5.8.1",
+  "build": {
+    "kind": "git-archive",
+    "notes": "Deterministic `git archive HEAD` bytes of the pinned commit. Proves source-archive reproducibility, not compiled-binary reproducibility."
+  },
+  "builders": [
+    { "suffix": "a", "group": "operator-a", "owner": "operator-a" },
+    { "suffix": "b", "group": "operator-b", "owner": "operator-b" },
+    { "suffix": "c", "group": "operator-c", "owner": "operator-c" }
+  ]
+}

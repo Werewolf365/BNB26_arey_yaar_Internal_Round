@@ -12,7 +12,7 @@ test("overview loads with summary and sections", async ({ page }) => {
 });
 
 test("nav reaches every section page", async ({ page }) => {
-  for (const [href, title] of [["/releases", "Releases"], ["/builders", "Builders"], ["/policies", "Policies"], ["/audit", "Audit trail"], ["/evidence", "Evidence explorer"]] as const) {
+  for (const [href, title] of [["/releases", "Releases"], ["/builders", "Builders"], ["/policies", "Policies"], ["/audit", "Audit trail"], ["/evidence", "Evidence explorer"], ["/blockchain", "Blockchain explorer"]] as const) {
     await page.goto(href);
     await expect(page.getByRole("heading", { name: title })).toBeVisible();
   }
@@ -42,6 +42,22 @@ test("evidence explorer validates empty input", async ({ page }) => {
 test("unknown verification detail shows empty state", async ({ page }) => {
   await page.goto("/verifications/does-not-exist");
   await expect(page.getByText("Not found.")).toBeVisible();
+});
+
+test("blockchain explorer validates empty input", async ({ page }) => {
+  await page.goto("/blockchain");
+  await expect(page.getByRole("heading", { name: "Blockchain explorer" })).toBeVisible();
+  await expect(page.getByText("Local Anvil transactions")).toBeVisible();
+  await page.getByRole("button", { name: "re-read anchor" }).click();
+  await expect(page.getByText("contract address and verification id are required")).toBeVisible();
+});
+
+test("blockchain explorer rejects malformed address", async ({ page }) => {
+  await page.goto("/blockchain");
+  await page.getByLabel("contract address").fill("not-an-address");
+  await page.getByLabel("verification id").fill("0x" + "1".repeat(64));
+  await page.getByRole("button", { name: "re-read anchor" }).click();
+  await expect(page.getByLabel("anchor lookup").getByText(/400|INVALID_INPUT|error/i).first()).toBeVisible();
 });
 
 test("basic landmarks exist for assistive tech", async ({ page }) => {

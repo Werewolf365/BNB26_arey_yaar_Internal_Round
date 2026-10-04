@@ -97,6 +97,39 @@ func TestBuildJobs(t *testing.T) {
 	}
 }
 
+// Explicit JSON null attestation behaves like an omitted field: the worker
+// sends `"attestation":null` when run without --signing-key, and that must
+// complete as unsigned evidence — never ATTESTATION_INVALID.
+func TestCompleteNullAttestation(t *testing.T) {
+	srv := newTestServer(t)
+	rel := createRelease(t, srv, "")
+	do(t, srv, "POST", "/api/v1/builders", `{"id":"builder-n","independenceGroup":"cloud-n"}`, nil)
+	code, env := do(t, srv, "POST", "/api/v1/verifications", fmt.Sprintf(`{"releaseId":%q}`, rel), nil)
+	if code != 201 {
+		t.Fatalf("seed: %d", code)
+	}
+	vid := mustData[map[string]any](t, env)["id"].(string)
+	if code, _ := do(t, srv, "POST", "/api/v1/verifications/"+vid+"/jobs", `{"builderIds":["builder-n"]}`, nil); code != 201 {
+		t.Fatalf("enqueue: %d", code)
+	}
+	code, env = do(t, srv, "POST", "/api/v1/jobs/claim", `{"owner":"w"}`, nil)
+	var claimed struct {
+		Job map[string]any `json:"job"`
+	}
+	_ = json.Unmarshal(env.Data, &claimed)
+	jid := claimed.Job["id"].(string)
+	d := "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	body := fmt.Sprintf(`{"ok":true,"digest":%q,"commit":"abc123","attestation":null}`, d)
+	if code, env := do(t, srv, "POST", "/api/v1/jobs/"+jid+"/complete", body, nil); code != 200 || !strings.Contains(string(env.Data), `"evaluation"`) {
+		t.Fatalf("null attestation must complete unsigned: %d %s", code, env.Data)
+	}
+	if code, env := do(t, srv, "GET", "/api/v1/verifications/"+vid+"/jobs", "", nil); code != 200 {
+		t.Fatalf("jobs readable: %d", code)
+	} else if !strings.Contains(string(env.Data), `"status":"SUCCEEDED"`) {
+		t.Fatalf("null-attestation job must succeed unsigned: %s", env.Data)
+	}
+}
+
 func TestBuildJobsFailurePath(t *testing.T) {
 	srv := newTestServer(t)
 	rel := createRelease(t, srv, "")

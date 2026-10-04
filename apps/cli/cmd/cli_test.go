@@ -205,6 +205,23 @@ func TestBlockchainCmdValidation(t *testing.T) {
 	}
 }
 
+func TestBlockchainVerifyCmdValidation(t *testing.T) {
+	// Missing flags -> 5.
+	if code, _, _ := execute("blockchain", "verify", "--contract", "0x5FbDB2315678afecb367f032d93F642f64180aa3"); code != 5 {
+		t.Fatalf("partial verify flags must exit 5, got %d", code)
+	}
+	// Malformed id -> 5 (no network touched).
+	if code, _, _ := execute("blockchain", "verify", "--contract", "0x5FbDB2315678afecb367f032d93F642f64180aa3", "--verification-id", "nope"); code != 5 {
+		t.Fatalf("malformed verification id must exit 5, got %d", code)
+	}
+	// Unreachable RPC -> 4 (read-only, nothing submitted).
+	if code, _, _ := execute("blockchain", "verify", "--rpc", "http://127.0.0.1:9",
+		"--contract", "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+		"--verification-id", "0x"+strings.Repeat("1", 64)); code != 4 {
+		t.Fatalf("unreachable verify must exit 4, got %d", code)
+	}
+}
+
 func TestVersionAndDoctor(t *testing.T) {
 	if code, out, _ := execute("version"); code != 0 || !strings.Contains(out, "quorum") {
 		t.Fatalf("version must exit 0: %d %s", code, out)

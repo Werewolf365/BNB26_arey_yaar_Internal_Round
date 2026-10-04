@@ -1,5 +1,6 @@
 "use client";
 import { use, useEffect, useState } from "react";
+import Link from "next/link";
 import { ApiError, Badge, Empty, Footer, PageHeader } from "../../../components/ui";
 import { evidenceBlobUrl, getAnchor, getVerification, listJobs, type Anchor, type BuildJob, type Conflict, type Evidence, type Excluded, type Verification } from "../../../lib/api";
 
@@ -93,7 +94,10 @@ export default function VerificationDetail({ params }: { params: Promise<{ id: s
               </section>
             )}
             <section className="section-card" aria-label="blockchain anchor">
-              <h2 className="font-black mb-2">Blockchain anchor</h2>
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="font-black">Blockchain anchor</h2>
+                <Link href="/blockchain" className="text-xs font-bold text-sky-900">open explorer</Link>
+              </div>
               {!anchor ? <Empty>Not anchored (or anchor lookup failed).</Empty> : (
                 <dl className="text-sm grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div className="glass-soft p-3"><dt className="text-xs uppercase">tx</dt><dd className="mono text-xs break-all">{anchor.txHash}</dd></div>

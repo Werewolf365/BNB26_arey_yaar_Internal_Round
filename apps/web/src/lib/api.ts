@@ -64,6 +64,12 @@ export const getAttestationObject = (id: string) =>
   get<EvidenceObject>(`/api/v1/attestations/${encodeURIComponent(id)}`);
 export const getAnchor = (verificationId: string) =>
   get<Anchor>(`/api/v1/blockchain/${encodeURIComponent(verificationId)}`);
+export type AnchorRead = {
+  anchored: boolean; chainId?: string; contract?: string;
+  txHash?: string; blockNumber?: string; eventFound?: boolean;
+};
+export const lookupAnchor = (verificationId: string, rpc: string, contract: string) =>
+  get<AnchorRead>(`/api/v1/blockchain/lookup/${encodeURIComponent(verificationId)}?rpc=${encodeURIComponent(rpc)}&contract=${encodeURIComponent(contract)}`);
 export const evidenceBlobUrl = (id: string) => `${API}/api/v1/evidence/${encodeURIComponent(id)}/blob`;
 
 export function asArray<T>(v: T[] | T | undefined): T[] {

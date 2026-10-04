@@ -247,3 +247,78 @@ this point.
   explicitly (LIVE here). Remaining honest skips in this env: live OSS
   Rebuild / testnet / S3 paths (env-gated, need creds/registry) and keyless
   OIDC signing (interactive by nature).
+
+## Change log — 2026-10-04: XZ showcase, chain read path, scan honesty
+
+- Yes, CONTEXT.md is updated every session, including this one.
+- govulncheck: YES, it matters (official Go vuln-DB scanner for our module
+  graph) and YES, we have it (`~/go/bin/govulncheck`, installed with
+  GOTOOLCHAIN=go1.27.1). Fixed `scripts/scan.mjs` to resolve the binary via
+  PATH + `~/go/bin` + `~/.local/bin` instead of bare-PATH lookup, so a fresh
+  shell no longer mis-reports SKIP after a successful install. Root
+  `package-lock.json` absence is INTENTIONAL (zero-dependency harness) and is
+  now documented in the script + report line.
+- Showcase: XZ Utils v5.8.1 pinned (`a522a226…746c`, archive
+  `sha256:20982c73…`, byte-deterministic, 2s shallow fetch).
+  `scripts/demo-real.mjs` (`make demo-real`, 7 phases) green with zero
+  failures/skips on a clean stack: 3 isolated Docker rebuilds agree ->
+  VERIFIED, 1-byte tamper -> REJECTED, SIMULATED minority ->
+  VERIFIED_WITH_CONFLICT, Anvil anchor + independent re-read, audit.
+- Bugs the showcase found and fixed (no weakening anywhere):
+  (1) worker `DockerArchiveDigest` shell pipeline masked git failure and all
+  builders "agreed" on sha256-of-empty (e3b0c44) — POSIX `&&` chain +
+  `safe.directory` scoping + `TestDockerArchiveFailsLoudly` regression test;
+  (2) `POST /jobs/:id/complete` with `"attestation":null` (worker without
+  --signing-key) failed ATTESTATION_INVALID while an omitted field worked —
+  null now equals absent + `TestCompleteNullAttestation`;
+  (3) demo script used a stale `./quorum` binary (silent exit 4 on unknown
+  subcommand) — demo scripts now always rebuild first.
+- New chain read path: `runner.ReadAnchor` (eth_call anchored + eth_getLogs
+  for tx/block, read-only), CLI `blockchain verify` (exit 0/1/4/5 + tests),
+  API `GET /api/v1/blockchain/lookup/:id?rpc=&contract=` (+ validation
+  tests), web `/blockchain` explorer (+ nav link, verification-page link,
+  Playwright tests — suite now 18/18 stable).
+- Policy: absolute counts only, no percentages (documented as deliberate in
+  `docs/demo-real.md`); default policy-a recommended with tolerance
+  trade-off explained. Presenter runbook `docs/demo-real.md` covers the full
+  journey: pin -> CLI ritual -> builder registration/keys/groups -> worker
+  loop -> decision math -> conflict -> anchor bindings -> explorer/CLI/API
+  inspection -> audit -> cleanup rules.
+- Results: `make test-all` PASS, `make test-web` 18/18, `make test-integration`
+  PASS, `make scan` green, `make demo-real` SHOWCASE COMPLETE (0 fail/0 skip).
+  Remaining gaps: no per-verification job scoping (claim is global FIFO —
+  runbook prescribes one-builder-at-a-time enqueue + clean stage DB), no
+  verification DELETE (append-only by design), Anvil ephemeral (deploy fresh
+  per demo, script does).
+
+## Change log — 2026-10-04: selectable projects, worker fetch fix, explorer, scan
+
+- CONTEXT.md updated throughout, as every session.
+- `demo-real.mjs` refactored: project-specific facts moved to
+  `projects/*.json` (`xz.json` pinned + `my-project.json` template);
+  `make demo-real PROJECT=name`, `make demo-list`, and bare
+  REPO/COMMIT/TAG/PACKAGE/ECOSYSTEM/NAME/VERSION overrides; config validated
+  BEFORE any service/record touch (https + allowlist, full-SHA, tag must
+  resolve to pinned commit via ls-remote or FAIL, ≥2 distinct builders/groups).
+- Worker fetch hardening (`rebuild.go`): every git fetch runs with
+  `GIT_TERMINAL_PROMPT=0` + empty credential helper — public fetches never
+  prompt (headless hang) and fail fast instead; `TestFetchUnreachableShaFailsFast`
+  (QUORUM_LIVE_NETWORK-gated, PASS live + SKIP offline).
+- Overrides bug found by second-project run: `--repo` didn't update the
+  derived display URL (worker fetched xz-URL with golang-SHA) — fixed, then
+  proven by a full green `golang/example` showcase alongside xz.
+- Stale-queue safety: worker stderr merged into output, claim must name OUR
+  verification id or the run FAILs (never silently eats another run's jobs);
+  anchor phase pre-checks via `blockchain verify` (idempotent reruns);
+  intermediate partial evaluations documented as honest history.
+- Chain visibility: `runner.ReadAnchor` + CLI `blockchain verify` (0/1/4/5)
+  + read-only `GET /api/v1/blockchain/lookup/:id` + web `/blockchain`
+  explorer (nav + verification-page links; RPC-must-resolve-from-API hint).
+- Scan: govulncheck resolved via PATH+~/go/bin+~/.local/bin (verified
+  executing, not skipped); root lockfile absence documented intentional.
+- Gates: test-all PASS, test-web 18/18 (stable ×3), test-integration PASS,
+  scan green, `make demo-list` lists xz + template, `make demo-real`
+  SHOWCASE COMPLETE for xz AND golang/example (0 fail/0 skip each).
+  Remaining: claim is global-FIFO (one-at-a-time enqueue + clean stage DB
+  prescribed), no row DELETE (append-only), keyless OIDC signing interactive,
+  live OSS/S3/testnet need creds/registry.

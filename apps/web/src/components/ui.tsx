@@ -21,7 +21,7 @@ export function PageHeader({ kicker, title, sub }: { kicker: string; title: stri
         <p className="text-sky-900/80 text-sm mt-1">{sub}</p>
       </div>
       <nav className="flex gap-2 flex-wrap" aria-label="Sections">
-        {[["/", "overview"], ["/releases", "releases"], ["/builders", "builders"], ["/policies", "policies"], ["/audit", "audit"], ["/evidence", "evidence"], ["/blockchain", "blockchain"]].map(([href, x]) => (
+        {[["/", "overview"], ["/releases", "releases"], ["/builders", "builders"], ["/policies", "policies"], ["/audit", "audit"], ["/evidence", "evidence"], ["/blockchain", "blockchain"], ["/projects", "projects"], ["/onboard", "onboard"]].map(([href, x]) => (
           <Link key={x} href={href} className="glass-soft px-4 py-2 text-sm font-semibold text-sky-900 hover:bg-white/70 transition">{x}</Link>
         ))}
       </nav>

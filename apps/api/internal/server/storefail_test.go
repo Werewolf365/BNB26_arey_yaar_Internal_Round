@@ -72,6 +72,15 @@ func (e errorStore) PutEvidence(ctx context.Context, e2 store.EvidenceObject) (s
 func (e errorStore) GetEvidence(ctx context.Context, id string) (store.EvidenceObject, error) {
 	return store.EvidenceObject{}, e.err
 }
+func (e errorStore) CreateProject(ctx context.Context, p store.Project) (store.Project, bool, error) {
+	return store.Project{}, false, e.err
+}
+func (e errorStore) GetProject(ctx context.Context, id string) (store.Project, error) {
+	return store.Project{}, e.err
+}
+func (e errorStore) ListProjects(ctx context.Context, n int) ([]store.Project, error) {
+	return nil, e.err
+}
 func (e errorStore) EnqueueJobs(ctx context.Context, v string, b []string) ([]store.BuildJob, error) {
 	return nil, e.err
 }

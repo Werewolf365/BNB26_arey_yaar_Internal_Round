@@ -341,3 +341,49 @@ this point.
 - Final gates: test-all PASS, test-integration PASS, scan green
   (govulncheck executing, root lockfile SKIP intentional).
   `projects/quorum-demo-c.json` is the user's file (kept, not ours).
+
+## Change log — 2026-10-04: GitHub onboarding (UI + API + projects)
+
+- `make add-project REPO= REF= [NAME=] [ECOSYSTEM=]` writes
+  `projects/<name>.json` via the live API (validates URL + repo existence,
+  resolves tag->SHA, detects ecosystem); usage error exits 2, API-down or
+  unresolvable exits 1. Demo sign-off reworded to `demo-real: done[, ...]`.
+- `writeErr` now masks only true 500s; 502/504 keep their messages (those
+  describe downstream state — rate limits, unreachable chains — not
+  internals). Existing INTERNAL_ERROR tests untouched and green.
+- New `services/github` (plain-HTTPS discovery: URL allowlist, tags with
+  annotated-tag peeling, SHA existence check, root-file ecosystem map,
+  10 s timeouts, 1 MiB cap, redirect confinement, typed errors) + httptest
+  suite incl. redirect-block, malformed upstream, token-header tests.
+- Store `Project` (mirrors projects/*.json) + `UNIQUE(repo,commit)` +
+  migration 0004 + memory/postgres/errorStore; dup returns existing.
+- Server: `Github *Client` field, 5 routes (discover/resolve/projects...),
+  `GITHUB_UNAVAILABLE`->502; `GITHUB_TOKEN` env relay in main.go
+  (rate-limit bearer for public endpoints only, never logged).
+- Web `/onboard` (URL -> tags -> resolve preview incl. default policy ->
+  create -> verify-release button), `/projects`, `/projects/:id` (config +
+  builder quorum-readiness + verify action), nav entries, `post()` helper
+  with typed error surfacing. Playwright onboard spec; suite 28/28.
+- BLOCKED live: container egress IP 152.58.43.106 exhausted unauthenticated
+  GitHub quota (403), host IP fine. Live neovim onboarding (discover v0.11.x
+  -> resolve -> create -> verify) PENDING either quota reset or user-provided
+  `GITHUB_TOKEN` (empty-scope PAT). REQ-037/038/039/040 added.
+
+## Change log — 2026-10-04: token live, golang/go proof, add-project, size cap
+
+- User-provided token wired via `GITHUB_TOKEN` (compose passthrough added;
+  value never committed): discover works with token-backed quota.
+- `make add-project` proven live: golang/go@go1.24.0 resolved
+  (`3901409b…`) and wrote `projects/golang-go.json`; full
+  `make demo-real PROJECT=golang-go` green on the 140 MB tree (3 isolated
+  rebuilds agree, tamper rejected, conflict surfaced, anchor + re-read).
+- Robustness fixes the big tree exposed: demo archives stream to disk +
+  incremental hashing (was: 64 MB exec buffer, ENOBUFS); new CLI
+  `verify --max-bytes` override for the 50 MiB default cap
+  (operator-explicit; oversize stays REJECTED with test); runbook documents it.
+- Playwright onboard spec fixed (stale-server + class-name assertion);
+  suite 28/28. Web `get()` now surfaces typed API error codes in the UI.
+- Neovim deferred: discover proven reachable with token, but the full flow
+  runs on xz/golang-go/quorum-demo-c (neovim tree is large; presenter may run
+  it the same way). Reminder: REVOKE the shared token after the demo — it
+  appeared in chat.

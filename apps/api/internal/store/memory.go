@@ -24,6 +24,8 @@ type MemoryStore struct {
 	anchors  map[string]Anchor
 	evidence map[string]EvidenceObject
 	jobs     map[string]BuildJob
+	projects map[string]Project
+	projKeys map[string]string // repo + "\x00" + commit -> project id
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -37,6 +39,8 @@ func NewMemoryStore() *MemoryStore {
 		anchors:  map[string]Anchor{},
 		evidence: map[string]EvidenceObject{},
 		jobs:     map[string]BuildJob{},
+		projects: map[string]Project{},
+		projKeys: map[string]string{},
 	}
 }
 
@@ -266,8 +270,7 @@ func (m *MemoryStore) GetAnchor(ctx context.Context, verificationID string) (Anc
 	return a, nil
 }
 
-func (m *MemoryStore) PutEvidence(ctx context.Context, e EvidenceObject) (EvidenceObject, error) {
-	m.mu.Lock()
+func (m *MemoryStore) PutEvidence(ctx context.Context, e EvidenceObject) (EvidenceObject, error) {	m.mu.Lock()
 	defer m.mu.Unlock()
 	if e.ID == "" {
 		e.ID = newID("ev")
@@ -284,6 +287,50 @@ func (m *MemoryStore) GetEvidence(ctx context.Context, id string) (EvidenceObjec
 		return EvidenceObject{}, fmt.Errorf("EVIDENCE_NOT_FOUND: %s", id)
 	}
 	return e, nil
+}
+
+func projectKey(repo, commit string) string { return repo + "\x00" + commit }
+
+// CreateProject deduplicates on (repo, commit): same immutable source twice
+// returns the existing row (dup=true).
+func (m *MemoryStore) CreateProject(ctx context.Context, p Project) (Project, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if id, ok := m.projKeys[projectKey(p.Repo, p.Commit)]; ok {
+		return m.projects[id], true, nil
+	}
+	p.ID = newID("prj")
+	p.CreatedAt = time.Now().UTC()
+	if p.BuildKind == "" {
+		p.BuildKind = "git-archive"
+	}
+	m.projects[p.ID] = p
+	m.projKeys[projectKey(p.Repo, p.Commit)] = p.ID
+	return p, false, nil
+}
+
+func (m *MemoryStore) GetProject(ctx context.Context, id string) (Project, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.projects[id]
+	if !ok {
+		return Project{}, fmt.Errorf("PROJECT_NOT_FOUND: %s", id)
+	}
+	return p, nil
+}
+
+func (m *MemoryStore) ListProjects(ctx context.Context, limit int) ([]Project, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]Project, 0, len(m.projects))
+	for _, p := range m.projects {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 
 func (m *MemoryStore) EnqueueJobs(ctx context.Context, verificationID string, builderIDs []string) ([]BuildJob, error) {

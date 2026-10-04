@@ -63,6 +63,7 @@ services:
       QUORUM_S3_PATH_STYLE: ${QUORUM_S3_PATH_STYLE:-"true"}
       QUORUM_BLOB_DIR: /data/evidence
       QUORUM_API_KEYS: ${QUORUM_API_KEYS:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       QUORUM_CORS_ORIGINS: ${QUORUM_CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
     ports: ["${QUORUM_API_PORT:-8080}:8080"]
     volumes: [evidencedata:/data/evidence]

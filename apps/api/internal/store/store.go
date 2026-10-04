@@ -78,6 +78,23 @@ type EvidenceObject struct {
 	SHA256         string `json:"sha256"`
 }
 
+// Project is an onboarded GitHub repository pinned to an immutable commit.
+// It mirrors projects/*.json (the demo-script format) so UI onboarding and
+// scripted demos share one configuration model.
+type Project struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Repo        string `json:"repo"`
+	Tag         string `json:"tag,omitempty"`
+	Commit      string `json:"commit"`
+	Package     string `json:"package,omitempty"`
+	Ecosystem   string `json:"ecosystem,omitempty"`
+	Version     string `json:"version,omitempty"`
+	BuildKind   string `json:"buildKind"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
 // Store is the persistence boundary. All multi-record mutations that must be
 // atomic are single methods so backends can wrap them in transactions.
 type Store interface {
@@ -107,6 +124,13 @@ type Store interface {
 
 	PutEvidence(ctx context.Context, e EvidenceObject) (EvidenceObject, error)
 	GetEvidence(ctx context.Context, id string) (EvidenceObject, error)
+
+	// Projects are onboarded repositories. CreateProject deduplicates on
+	// (repo, commit): same source twice returns the existing row (dup=true),
+	// never a second project for one immutable source.
+	CreateProject(ctx context.Context, p Project) (Project, bool, error)
+	GetProject(ctx context.Context, id string) (Project, error)
+	ListProjects(ctx context.Context, limit int) ([]Project, error)
 
 	// ListAuditAll returns the complete table oldest-first with no limit.
 	// Chain verification MUST use this: ListAudit(limit) returns a newest-N

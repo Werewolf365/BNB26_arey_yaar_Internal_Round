@@ -15,8 +15,12 @@ each step live. Total ~5 minutes on a warm machine.
    resolve the tag to the full commit SHA: `git ls-remote <url> v0.1.0`.
 3. Copy `projects/my-project.json` to `projects/<yours>.json` and fill in
    `repo` (https `.git` URL), `tag`, `commit` (40-hex SHA — never the tag),
-   `package`/`ecosystem`/`version`. Or skip the file and pass overrides:
-   `make demo-real REPO=https://github.com/<you>/<repo>.git COMMIT=<sha> TAG=v0.1.0 PACKAGE=<p> ECOSYSTEM=go NAME=<n> VERSION=v0.1.0`.
+   `package`/`ecosystem`/`version`. Or generate it instead of hand-writing:
+   `make add-project REPO=https://github.com/<you>/<repo> REF=<tag|sha>
+   [NAME=<name>] [ECOSYSTEM=go|npm|cargo|pypi|c]` (resolves via the API, then
+   `make demo-real PROJECT=<name>`). Direct overrides also work:
+   `make demo-real REPO=<git-url> COMMIT=<sha> TAG=<tag> ...`. Large trees (>50 MiB) need an explicit
+   cap at CLI time: `verify --max-bytes <bytes>` (default 50 MiB guard).
 4. Sanity-check determinism yourself (this is what every builder repeats):
    `git archive <sha> | sha256sum` twice → identical bytes.
 5. The script validates everything up front (allowlisted host, full SHA,

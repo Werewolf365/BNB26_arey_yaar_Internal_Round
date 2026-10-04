@@ -1,0 +1,32 @@
+{
+  "name": "golang-go",
+  "description": "go go1.24.0 — onboarded via make add-project",
+  "repo": "https://github.com/golang/go.git",
+  "webRepo": "https://github.com/golang/go",
+  "tag": "go1.24.0",
+  "commit": "3901409b5d0fb7c85a3e6730a59943cc93b2835c",
+  "package": "go",
+  "ecosystem": "go",
+  "version": "go1.24.0",
+  "build": {
+    "kind": "git-archive",
+    "notes": "Builders reproduce git archive bytes for the pinned commit. This verifies source-archive integrity, not compiled-binary reproducibility."
+  },
+  "builders": [
+    {
+      "suffix": "a",
+      "group": "operator-a",
+      "owner": "operator-a"
+    },
+    {
+      "suffix": "b",
+      "group": "operator-b",
+      "owner": "operator-b"
+    },
+    {
+      "suffix": "c",
+      "group": "operator-c",
+      "owner": "operator-c"
+    }
+  ]
+}

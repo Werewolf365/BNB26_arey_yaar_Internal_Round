@@ -13,7 +13,7 @@
 // What this proves (and does NOT claim): see docs/demo-real.md.
 import { createHash, randomBytes } from "node:crypto";
 import { execFileSync, execSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -134,24 +134,38 @@ try {
   execSync(`git init -q ${dir} && git -C ${dir} remote add origin ${P.repo} && git -C ${dir} fetch -q --depth 1 origin ${P.commit} && git -C ${dir} checkout -q FETCH_HEAD`, { stdio: "pipe", timeout: 300000 });
   const got = execSync(`git -C ${dir} log -1 --format=%H`, { encoding: "utf8" }).trim();
   got.toLowerCase() === String(P.commit).toLowerCase() ? ok(`commit pinned ${P.commit}`) : fail(`commit drift: ${got}`);
-  // Two independent archives: same bytes from repeated builds -> same digest.
-  // Matching bytes are NOT tampering evidence; only differing bytes are.
-  const a = execSync(`git -C ${dir} archive HEAD`, { encoding: "binary", maxBuffer: 64 << 20 });
-  const b = execSync(`git -C ${dir} archive HEAD`, { encoding: "binary", maxBuffer: 64 << 20 });
-  const da = sha(Buffer.from(a, "binary")), db = sha(Buffer.from(b, "binary"));
+  // Two independent archives, streamed to disk + hashed incrementally (never
+  // buffered: big trees like golang/go exceed exec buffers). Same bytes from
+  // repeated builds -> same digest. Matching bytes are NOT tampering
+  // evidence; only differing bytes are.
+  const { createReadStream } = await import("node:fs");
+  const hashFile = (p) => new Promise((resolve, reject) => {
+    const h = createHash("sha256");
+    createReadStream(p).on("data", (c) => h.update(c)).on("end", () => resolve(h.digest("hex"))).on("error", reject);
+  });
+  const tarA = join(work, "a.tar"), tarB = join(work, "b.tar");
+  execSync(`git -C ${dir} archive HEAD > ${tarA}`, { stdio: "pipe", timeout: 600000 });
+  execSync(`git -C ${dir} archive HEAD > ${tarB}`, { stdio: "pipe", timeout: 600000 });
+  const da = await hashFile(tarA), db = await hashFile(tarB);
   da === db ? ok(`independent archives byte-identical, sha256:${da.slice(0, 16)}… (match is agreement, not tampering)`) : fail("archive nondeterministic");
   refDigest = "sha256:" + da;
-  writeFileSync(join(work, "artifact.tar"), Buffer.from(a, "binary"));
+  execSync(`cp ${tarA} ${join(work, "artifact.tar")}`);
 } catch (e) { if (!refDigest) fail("source fetch failed: " + String(e).split("\n")[0]); }
 
 // --- 2. CLI ritual ---
 step("2/7 CLI: hash + policy on the real tarball");
 const shortCommit = String(P.commit).slice(0, 12);
 if (refDigest) {
-  try { sh(quorum, ["verify", "--repo", webRepo, "--commit", P.commit, "--artifact", join(work, "artifact.tar"), "--expected-digest", refDigest], { stdio: "pipe" }); ok("valid tarball -> VERIFIED (exit 0)"); }
+  // Operator-explicit size cap: big trees (golang/go ~140 MB) exceed the
+  // 50 MiB CLI default. The cap is a resource guard, not evidence — raising
+  // it is logged here and never weakens digest/policy checks.
+  const { statSync } = await import("node:fs");
+  const cap = statSync(join(work, "artifact.tar")).size + (1 << 20);
+  const capFlag = ["--max-bytes", String(cap)];
+  try { sh(quorum, ["verify", "--repo", webRepo, "--commit", P.commit, "--artifact", join(work, "artifact.tar"), "--expected-digest", refDigest, ...capFlag], { stdio: "pipe" }); ok("valid tarball -> VERIFIED (exit 0)"); }
   catch (e) { fail(`valid tarball exit ${e.status}`); }
   execSync(`printf 'tamper' >> ${join(work, "artifact.tar")}`);
-  try { sh(quorum, ["verify", "--repo", webRepo, "--commit", P.commit, "--artifact", join(work, "artifact.tar"), "--expected-digest", refDigest], { stdio: "pipe" }); fail("tampered tarball must not verify"); }
+  try { sh(quorum, ["verify", "--repo", webRepo, "--commit", P.commit, "--artifact", join(work, "artifact.tar"), "--expected-digest", refDigest, ...capFlag], { stdio: "pipe" }); fail("tampered tarball must not verify"); }
   catch (e) { e.status === 1 ? ok("1-byte tamper -> REJECTED (exit 1, ARTIFACT_HASH_MISMATCH)") : fail(`tamper exit ${e.status}, want 1`); }
 } else skip("no reference digest");
 
@@ -273,5 +287,5 @@ if (apiOk) {
   Array.isArray(a.json?.data) && a.json.data.length > 0 ? ok(`${a.json.data.length} records (latest page); full chain: POST /audit/:id/verify-chain`) : fail("audit empty");
 } else skip("API down");
 
-console.log(failures === 0 ? "\ndemo-real: SHOWCASE COMPLETE" : `\ndemo-real: ${failures} FAILURE(S)`);
+console.log(failures === 0 ? "\ndemo-real: done, all phases passed" : `\ndemo-real: done with ${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

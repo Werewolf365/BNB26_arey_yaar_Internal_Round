@@ -5,7 +5,7 @@
 # - `test-all` is self-provisioning via Docker Compose where possible.
 # - Live external services (real OSS Rebuild, testnets) live in `test-external` only.
 
-.PHONY: help doctor setup dev test test-unit test-integration test-e2e test-contracts test-security test-web test-external test-all lint format coverage demo demo-slice fuzz mutation sbom sign scan clean
+.PHONY: help doctor setup dev test test-unit test-integration test-e2e test-contracts test-security test-web test-external test-all lint format coverage demo demo-slice demo-real demo-list add-project fuzz mutation sbom sign scan clean
 
 help:
 	@echo "Quorum targets:"
@@ -28,6 +28,7 @@ help:
 	@echo "  make demo-slice       - repeatable Slice-1 demo (valid/tampered/conflict)"
 	@echo "  make demo-real PROJECT=x  - real-project showcase (or REPO=/COMMIT=/TAG=… overrides)"
 	@echo "  make demo-list          - list available demo project configs"
+	@echo "  make add-project        - onboard a repo to projects/<name>.json: REPO=<github-url> REF=<tag|sha> [NAME=] [ECOSYSTEM=]"
 	@echo "  make fuzz             - short property fuzz runs (quorum invariants + canonical stability)"
 	@echo "  make mutation         - mutation gate: every engine mutant must be killed by tests"
 	@echo "  make sbom             - SBOM (syft CycloneDX when installed, else Go/npm inventory)"
@@ -121,6 +122,9 @@ demo-real:
 
 demo-list:
 	node scripts/demo-real.mjs --list
+
+add-project:
+	node scripts/add-project.mjs $(if $(REPO),--repo $(REPO)) $(if $(REF),--ref $(REF)) $(if $(NAME),--name $(NAME)) $(if $(ECOSYSTEM),--ecosystem $(ECOSYSTEM))
 
 fuzz:
 	go test -count=1 -fuzz FuzzEvaluateDeterminism -fuzztime 20s ./services/policy/

@@ -10,6 +10,7 @@ import (
 
 	"github.com/quorum/quorum/apps/api/internal/server"
 	"github.com/quorum/quorum/apps/api/internal/store"
+	gh "github.com/quorum/quorum/services/github"
 	"github.com/quorum/quorum/services/storage"
 )
 
@@ -92,10 +93,25 @@ func main() {
 		log.Printf("QUORUM_API_KEYS unset: admin writes are OPEN (local dev only — set keys before exposing)")
 	}
 	srv := &http.Server{
-		Addr: addr, Handler: server.NewWithConfig(st, blobs, cfg),
+		Addr: addr, Handler: newAPIHandler(st, blobs, cfg),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,
 		WriteTimeout: 60 * time.Second, IdleTimeout: 120 * time.Second,
 	}
 	log.Printf("quorum api listening on %s", addr)
 	log.Fatal(srv.ListenAndServe())
+}
+
+// newAPIHandler builds the router. GITHUB_TOKEN (optional, never logged) is
+// a rate-limit-only bearer for public GitHub API reads: unauthenticated
+// quota is 60 req/hour per egress IP and shared networks exhaust it. Empty
+// scope is sufficient; private repositories are never accessed.
+func newAPIHandler(st store.Store, blobs storage.Backend, cfg server.Config) http.Handler {
+	s := server.NewWithConfig(st, blobs, cfg)
+	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
+		s.Github = &gh.Client{Token: tok}
+		log.Printf("github onboarding: token-backed quota enabled")
+	} else {
+		log.Printf("GITHUB_TOKEN unset: onboarding uses unauthenticated quota (60 req/hour)")
+	}
+	return s
 }

@@ -45,8 +45,9 @@ type Data<T> = { data: T; requestId?: string };
 
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(`${API}${path}`, { cache: "no-store" });
-  if (!r.ok) throw new Error(`${r.status} ${path}`);
-  const j = (await r.json()) as Data<T>;
+  const j = (await r.json().catch(() => null)) as (Data<T> & { error?: { code: string; message: string } }) | null;
+  if (!r.ok) throw new Error(j?.error ? `${j.error.code}: ${j.error.message}` : `${r.status} ${path}`);
+  if (!j) throw new Error(`empty response ${path}`);
   return j.data;
 }
 
@@ -71,6 +72,45 @@ export type AnchorRead = {
 export const lookupAnchor = (verificationId: string, rpc: string, contract: string) =>
   get<AnchorRead>(`/api/v1/blockchain/lookup/${encodeURIComponent(verificationId)}?rpc=${encodeURIComponent(rpc)}&contract=${encodeURIComponent(contract)}`);
 export const evidenceBlobUrl = (id: string) => `${API}/api/v1/evidence/${encodeURIComponent(id)}/blob`;
+
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(`${API}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  const j = (await r.json()) as Data<T> & { error?: { code: string; message: string } };
+  if (!r.ok) throw new Error(j.error ? `${j.error.code}: ${j.error.message}` : `${r.status} ${path}`);
+  return j.data;
+}
+
+export type DiscoveredRepo = { owner: string; repo: string; tags: string[] };
+export type ResolvedRef = {
+  owner: string; repo: string; tag: string; commit: string;
+  ecosystem: string; buildKind: string; displayName: string;
+  defaultPolicy: Record<string, unknown>;
+};
+export type Project = {
+  id: string; name: string; description?: string; repo: string; tag: string;
+  commit: string; package?: string; ecosystem?: string; version?: string;
+  buildKind: string; createdAt: string;
+};
+
+export const discoverRepo = (repo: string) =>
+  get<DiscoveredRepo>(`/api/v1/onboarding/discover?repo=${encodeURIComponent(repo)}`);
+export const resolveRef = (repo: string, ref: string, ecosystem?: string) =>
+  post<ResolvedRef>(`/api/v1/onboarding/resolve`, { repo, ref, ecosystem: ecosystem || "" });
+export const createProject = (input: {
+  repo: string; ref: string; displayName?: string; description?: string;
+  ecosystem?: string; package?: string; version?: string;
+}) => post<Project>(`/api/v1/projects`, input);
+export const listProjects = () => get<Project[]>(`/api/v1/projects`);
+export const getProject = (id: string) => get<Project>(`/api/v1/projects/${encodeURIComponent(id)}`);
+export const createRelease = (input: {
+  package?: string; ecosystem?: string; name?: string; version?: string;
+  repo: string; commit: string; expectedDigest?: string;
+}) => post<Release>(`/api/v1/releases`, input);
 
 export function asArray<T>(v: T[] | T | undefined): T[] {
   if (Array.isArray(v)) return v;

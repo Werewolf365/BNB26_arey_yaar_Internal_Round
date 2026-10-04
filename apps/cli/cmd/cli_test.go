@@ -54,6 +54,10 @@ func TestVerifyMatrix(t *testing.T) {
 			t.Fatalf("json error envelope: %v %q", err, errOut)
 		}
 	}
+	// Explicit size cap: tiny artifact over a 1-byte cap rejects as oversize.
+	if code, out, _ := execute("verify", "--repo", "https://github.com/example/tiny", "--commit", "abc123", "--fixture-tiny", "--max-bytes", "1"); code != 1 || !strings.Contains(out, "ARTIFACT_OVERSIZED") {
+		t.Fatalf("oversize must exit 1 REJECTED: %d %s", code, out)
+	}
 	// Live OSS mode without a package ref is invalid input.
 	if code, _, _ := execute("verify", "--repo", "https://github.com/example/tiny", "--commit", "c", "--fixture-tiny", "--oss-mode", "live"); code != 5 {
 		t.Fatalf("live without ref must exit 5, got %d", code)

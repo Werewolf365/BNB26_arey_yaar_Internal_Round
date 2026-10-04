@@ -28,6 +28,12 @@ POST   /api/v1/releases
 GET    /api/v1/releases
 GET    /api/v1/releases/:id
 
+GET    /api/v1/onboarding/discover?repo=URL   # validate URL + list tags (read-only)
+POST   /api/v1/onboarding/resolve            # {repo, ref, ecosystem?} -> pinned preview (no writes)
+POST   /api/v1/projects                      # resolve + persist (dedupe on repo+commit)
+GET    /api/v1/projects
+GET    /api/v1/projects/:id
+
 POST   /api/v1/verifications                 # runs the pipeline (same runner semantics as CLI)
 GET    /api/v1/verifications/:id
 POST   /api/v1/verifications/:id/reverify

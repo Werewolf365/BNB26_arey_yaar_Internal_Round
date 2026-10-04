@@ -17,7 +17,7 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-var migrationOrder = []string{"0001_init.sql", "0002_jobs.sql", "0003_signed_worker_attestations.sql"}
+var migrationOrder = []string{"0001_init.sql", "0002_jobs.sql", "0003_signed_worker_attestations.sql", "0004_projects.sql"}
 
 // Postgres is the production Store.
 type Postgres struct {
@@ -416,6 +416,57 @@ func (p *Postgres) PutEvidence(ctx context.Context, e EvidenceObject) (EvidenceO
 	_, err := p.pool.Exec(ctx, `INSERT INTO evidence_objects(id, verification_id, kind, storage_key, sha256) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO NOTHING`,
 		e.ID, e.VerificationID, e.Kind, e.StorageKey, e.SHA256)
 	return e, err
+}
+
+// CreateProject deduplicates on (repo, commit): same immutable source twice
+// returns the existing row (dup=true).
+func (p *Postgres) CreateProject(ctx context.Context, pr Project) (Project, bool, error) {
+	var existing Project
+	err := p.pool.QueryRow(ctx, `SELECT id, name, description, repo, tag, commit, package, ecosystem, version, build_kind, created_at FROM projects WHERE repo=$1 AND commit=$2`,
+		pr.Repo, pr.Commit).Scan(&existing.ID, &existing.Name, &existing.Description, &existing.Repo, &existing.Tag, &existing.Commit, &existing.Package, &existing.Ecosystem, &existing.Version, &existing.BuildKind, &existing.CreatedAt)
+	if err == nil {
+		return existing, true, nil
+	}
+	pr.ID = newID("prj")
+	pr.CreatedAt = time.Now().UTC()
+	if pr.BuildKind == "" {
+		pr.BuildKind = "git-archive"
+	}
+	if _, err := p.pool.Exec(ctx, `INSERT INTO projects(id, name, description, repo, tag, commit, package, ecosystem, version, build_kind, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		pr.ID, pr.Name, pr.Description, pr.Repo, pr.Tag, pr.Commit, pr.Package, pr.Ecosystem, pr.Version, pr.BuildKind, pr.CreatedAt); err != nil {
+		return Project{}, false, fmt.Errorf("OPERATIONAL: insert project: %v", err)
+	}
+	return pr, false, nil
+}
+
+func (p *Postgres) GetProject(ctx context.Context, id string) (Project, error) {
+	var pr Project
+	err := p.pool.QueryRow(ctx, `SELECT id, name, description, repo, tag, commit, package, ecosystem, version, build_kind, created_at FROM projects WHERE id=$1`, id).
+		Scan(&pr.ID, &pr.Name, &pr.Description, &pr.Repo, &pr.Tag, &pr.Commit, &pr.Package, &pr.Ecosystem, &pr.Version, &pr.BuildKind, &pr.CreatedAt)
+	if err != nil {
+		return pr, notFoundError(err, "PROJECT_NOT_FOUND", id)
+	}
+	return pr, nil
+}
+
+func (p *Postgres) ListProjects(ctx context.Context, limit int) ([]Project, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := p.pool.Query(ctx, `SELECT id, name, description, repo, tag, commit, package, ecosystem, version, build_kind, created_at FROM projects ORDER BY created_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Project{}
+	for rows.Next() {
+		var pr Project
+		if err := rows.Scan(&pr.ID, &pr.Name, &pr.Description, &pr.Repo, &pr.Tag, &pr.Commit, &pr.Package, &pr.Ecosystem, &pr.Version, &pr.BuildKind, &pr.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, pr)
+	}
+	return out, rows.Err()
 }
 
 // DeleteAllJobs removes every queued/claimed job (test isolation helper).

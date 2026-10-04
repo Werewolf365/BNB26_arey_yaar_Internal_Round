@@ -21,6 +21,7 @@ import (
 
 	"github.com/quorum/quorum/apps/api/internal/store"
 	"github.com/quorum/quorum/internal/runner"
+	gh "github.com/quorum/quorum/services/github"
 	"github.com/quorum/quorum/services/policy"
 	"github.com/quorum/quorum/services/sigstore"
 	"github.com/quorum/quorum/services/storage"
@@ -32,6 +33,9 @@ type Server struct {
 	blobs storage.Backend
 	mux   *http.ServeMux
 	cfg   Config
+	// Github is the repository-discovery client (overrideable in tests).
+	// Nil means the default public client.
+	Github *gh.Client
 	// limiter is nil unless Config.RateLimitRPS > 0. It must live on the
 	// Server (not per-request) so per-IP buckets persist across requests.
 	limiter *rateLimiter
@@ -86,6 +90,12 @@ func NewWithConfig(st store.Store, blobs storage.Backend, cfg Config) *Server {
 
 	s.mux.HandleFunc("POST /api/v1/evidence", s.handlePutEvidence)
 	s.mux.HandleFunc("GET /api/v1/evidence/{id}/blob", s.handleGetEvidenceBlob)
+
+	s.mux.HandleFunc("GET /api/v1/onboarding/discover", s.handleDiscover)
+	s.mux.HandleFunc("POST /api/v1/onboarding/resolve", s.handleResolve)
+	s.mux.HandleFunc("POST /api/v1/projects", s.handleCreateProject)
+	s.mux.HandleFunc("GET /api/v1/projects", s.handleListProjects)
+	s.mux.HandleFunc("GET /api/v1/projects/{id}", s.handleGetProject)
 	return s
 }
 
@@ -145,6 +155,10 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	code, msg, status := classify(err)
 	if status >= 500 {
 		log.Printf("request_id=%s internal: %v", requestID(r), err)
+	}
+	if status == 500 {
+		// True internals stay masked; 502/504 describe downstream state
+		// (rate limits, unreachable chains) and stay actionable.
 		msg = "internal error"
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -180,7 +194,7 @@ func classify(err error) (string, string, int) {
 		return code, trimPrefix(msg), 429
 	case "INSUFFICIENT_EVIDENCE", "POLICY_VIOLATION":
 		return code, trimPrefix(msg), 422
-	case "OSS_REBUILD_UNAVAILABLE", "BLOCKCHAIN_UNAVAILABLE":
+	case "OSS_REBUILD_UNAVAILABLE", "BLOCKCHAIN_UNAVAILABLE", "GITHUB_UNAVAILABLE":
 		return code, trimPrefix(msg), 502
 	case "BUILDER_TIMEOUT":
 		return code, trimPrefix(msg), 504

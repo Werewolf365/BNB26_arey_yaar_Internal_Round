@@ -61,5 +61,6 @@ Exit codes: 0=verified 1=rejected 2=insufficient evidence
 	c.Flags().StringVar(&o.PolicyFile, "policy-file", "", "full JSON policy file (overrides scalar flags)")
 	c.Flags().StringVar(&o.OssMode, "oss-mode", "fixture", "oss-rebuild evidence: fixture (deterministic label) or live (shells the real CLI)")
 	c.Flags().StringVar(&o.OssBin, "oss-bin", "", "oss-rebuild executable (default: PATH lookup)")
+	c.Flags().Int64Var(&o.MaxBytes, "max-bytes", 0, "artifact size cap in bytes (0 = 50 MiB default; raise explicitly for large trees, logged)")
 	return c
 }

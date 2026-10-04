@@ -34,7 +34,7 @@ POST   /api/v1/verifications/:id/reverify
 POST   /api/v1/verifications/:id/jobs      # enqueue builder rebuild jobs
 GET    /api/v1/verifications/:id/jobs
 
-POST   /api/v1/jobs/claim                  # workers poll: {owner, leaseSeconds}
+POST   /api/v1/jobs/claim                  # workers poll: {owner, leaseSeconds, verificationId?}
 GET    /api/v1/jobs/:id
 POST   /api/v1/jobs/:id/complete           # {ok, digest, commit, errorCode, errorDetail, attestation?};
                                            # attestation is verified against the registered builder key;

@@ -29,11 +29,12 @@ func main() {
 	workdir := flag.String("workdir", os.TempDir(), "scratch parent for fetched sources")
 	allowFallback := flag.Bool("allow-host-fallback", false, "ONLY for dev: archive on host when no Docker daemon (logged, never default)")
 	signingKey := flag.String("signing-key", "", "builder ECDSA P-256 private-key PEM; signs successful rebuild provenance")
+	verification := flag.String("verification", "", "only claim jobs for this verification id (empty = any; isolates parallel demos/reruns)")
 	flag.Parse()
 
 	c := client.New(*api, *owner)
 	for {
-		done, stop := runOnce(c, *timeout, *image, *dockerBin, *gitBin, *workdir, *allowFallback, *signingKey)
+		done, stop := runOnce(c, *timeout, *image, *dockerBin, *gitBin, *workdir, *allowFallback, *signingKey, *verification)
 		_ = done
 		if stop || *once {
 			return
@@ -43,8 +44,8 @@ func main() {
 }
 
 // runOnce claims and executes one job; stop=true means exit the loop.
-func runOnce(c *client.Client, timeout time.Duration, image, dockerBin, gitBin, workdir string, allowFallback bool, signingKey string) (bool, bool) {
-	job, claimed, err := c.Claim()
+func runOnce(c *client.Client, timeout time.Duration, image, dockerBin, gitBin, workdir string, allowFallback bool, signingKey, verification string) (bool, bool) {
+	job, claimed, err := c.Claim(verification)
 	if err != nil {
 		log.Printf("owner=%s claim failed: %v", c.Owner, err)
 		return false, false

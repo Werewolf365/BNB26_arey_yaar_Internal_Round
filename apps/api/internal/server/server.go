@@ -469,18 +469,26 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleClaimJob(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Owner        string `json:"owner"`
-		LeaseSeconds int    `json:"leaseSeconds"`
+		Owner          string `json:"owner"`
+		LeaseSeconds   int    `json:"leaseSeconds"`
+		VerificationID string `json:"verificationId"`
 	}
 	if err := s.decodeJSON(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}
+	// Scoped claims fail fast on typos instead of idling on an empty queue.
+	if in.VerificationID != "" {
+		if _, err := s.store.GetVerification(r.Context(), in.VerificationID); err != nil {
+			writeErr(w, r, err)
+			return
+		}
+	}
 	lease := time.Duration(in.LeaseSeconds) * time.Second
 	if lease <= 0 {
 		lease = 5 * time.Minute
 	}
-	j, claimed, err := s.store.ClaimJob(r.Context(), in.Owner, lease)
+	j, claimed, err := s.store.ClaimJob(r.Context(), in.Owner, lease, in.VerificationID)
 	if err != nil {
 		writeErr(w, r, err)
 		return

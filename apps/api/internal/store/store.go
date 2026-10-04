@@ -121,7 +121,10 @@ type Store interface {
 	ListJobs(ctx context.Context, verificationID string) ([]BuildJob, error)
 	GetJob(ctx context.Context, id string) (BuildJob, error)
 	// ClaimJob atomically moves one QUEUED job (or an expired lease) to CLAIMED.
-	ClaimJob(ctx context.Context, owner string, lease time.Duration) (BuildJob, bool, error)
+	// verificationID scopes the claim to one verification ("" = any); scoping
+	// lets reruns and parallel demos coexist without touching each other's
+	// jobs — a worker only ever sees its own verification's queue.
+	ClaimJob(ctx context.Context, owner string, lease time.Duration, verificationID string) (BuildJob, bool, error)
 	CompleteJob(ctx context.Context, id string, ok bool, digest, commit, errCode, errDetail, attestation string, signatureValid bool) (BuildJob, error)
 }
 

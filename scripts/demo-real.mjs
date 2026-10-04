@@ -194,9 +194,9 @@ if (apiOk && releaseId && builders.length === P.builders.length && have("docker"
       enq.status === 201 ? ok(`rebuild job enqueued for ${P.builders[i].suffix}`) : fail(`enqueue ${P.builders[i].suffix}: ${enq.status} ${enq.text.slice(0, 120)}`);
       if (enq.status !== 201) continue;
       try {
-        // Worker progress logs go to stderr; merge streams so the claim can
-        // be attributed to our verification id (proves no foreign job).
-        const out = execSync(`./quorum-worker --api ${API} --owner ${P.builders[i].owner} --signing-key ${keys[P.builders[i].suffix]} --once 2>&1`, { cwd: ROOT, encoding: "utf8", timeout: 600000 });
+        // --verification scopes the claim to OUR pending verification, so
+        // stale QUEUED jobs from other runs are never touched (reruns safe).
+        const out = execSync(`./quorum-worker --api ${API} --owner ${P.builders[i].owner} --signing-key ${keys[P.builders[i].suffix]} --verification ${pendingId} --once 2>&1`, { cwd: ROOT, encoding: "utf8", timeout: 600000 });
         out.includes(pendingId) ? ok(`${P.builders[i].owner} rebuilt + signed (claimed our job)`) : fail(`${P.builders[i].owner} claimed a FOREIGN job — stale queue from another run? reset demo state`);
       } catch (e) { fail(`${P.builders[i].owner} worker failed: ${String(e?.message || e).split("\n").slice(-3).join(" / ").slice(0, 200)}`); }
     }

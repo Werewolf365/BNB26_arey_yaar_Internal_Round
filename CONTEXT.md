@@ -322,3 +322,22 @@ this point.
   Remaining: claim is global-FIFO (one-at-a-time enqueue + clean stage DB
   prescribed), no row DELETE (append-only), keyless OIDC signing interactive,
   live OSS/S3/testnet need creds/registry.
+
+## Change log — 2026-10-04: user project run + scoped claiming
+
+- User ran their own repo (`quorum-demo-c` v0.1.0, commit `233a039…`) through
+  `make demo-real PROJECT=quorum-demo-c`: pin/CLI/conflict/anchor phases all
+  passed, but workers a+b claimed FOREIGN stale QUEUED jobs left by an
+  earlier failed run (FIFO order) while c got its own by luck. Nothing was
+  tampered — the claim-attribution guard caught it exactly as designed.
+- Fix so reruns never need a DB wipe: scoped claiming. `Store.ClaimJob`
+  takes an optional verification id ("" = any, backward compatible;
+  memory + postgres), `POST /jobs/claim` accepts optional `verificationId`
+  (unknown id 404s), worker flag `--verification`, demo script passes its
+  pending verification id. Unit tests: memory isolation + API scoped/404
+  paths. Docs: api.md, workers.md, runbook.
+- Re-ran `make demo-real PROJECT=quorum-demo-c` on the SAME dirty DB:
+  SHOWCASE COMPLETE, 3/3 builders verified, no wipe needed.
+- Final gates: test-all PASS, test-integration PASS, scan green
+  (govulncheck executing, root lockfile SKIP intentional).
+  `projects/quorum-demo-c.json` is the user's file (kept, not ours).

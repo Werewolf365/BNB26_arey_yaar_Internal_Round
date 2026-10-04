@@ -83,9 +83,14 @@ func unwrap(raw []byte, status int) (json.RawMessage, error) {
 	return env.Data, nil
 }
 
-// Claim asks for one queued job (any verification).
-func (c *Client) Claim() (Job, bool, error) {
-	raw, status, err := c.call("POST", "/api/v1/jobs/claim", map[string]any{"owner": c.Owner, "leaseSeconds": 300})
+// Claim asks for one queued job. verificationID scopes the claim to one
+// verification ("" = any queue); scoped workers never touch other runs' jobs.
+func (c *Client) Claim(verificationID string) (Job, bool, error) {
+	body := map[string]any{"owner": c.Owner, "leaseSeconds": 300}
+	if verificationID != "" {
+		body["verificationId"] = verificationID
+	}
+	raw, status, err := c.call("POST", "/api/v1/jobs/claim", body)
 	if err != nil {
 		return Job{}, false, err
 	}

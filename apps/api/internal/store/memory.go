@@ -336,7 +336,7 @@ func (m *MemoryStore) GetJob(ctx context.Context, id string) (BuildJob, error) {
 	return j, nil
 }
 
-func (m *MemoryStore) ClaimJob(ctx context.Context, owner string, lease time.Duration) (BuildJob, bool, error) {
+func (m *MemoryStore) ClaimJob(ctx context.Context, owner string, lease time.Duration, verificationID string) (BuildJob, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if owner == "" {
@@ -345,6 +345,9 @@ func (m *MemoryStore) ClaimJob(ctx context.Context, owner string, lease time.Dur
 	now := time.Now().UTC()
 	var best *BuildJob
 	for _, j := range m.jobs {
+		if verificationID != "" && j.VerificationID != verificationID {
+			continue
+		}
 		if j.Status == "QUEUED" || ((j.Status == "CLAIMED" || j.Status == "RUNNING") && !j.LeaseExpiresAt.After(now)) {
 			c := j
 			if best == nil || c.CreatedAt.Before(best.CreatedAt) {

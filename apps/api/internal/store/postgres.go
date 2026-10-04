@@ -505,7 +505,7 @@ func (p *Postgres) GetJob(ctx context.Context, id string) (BuildJob, error) {
 	return j, notFoundError(err, "JOB_NOT_FOUND", id)
 }
 
-func (p *Postgres) ClaimJob(ctx context.Context, owner string, lease time.Duration) (BuildJob, bool, error) {
+func (p *Postgres) ClaimJob(ctx context.Context, owner string, lease time.Duration, verificationID string) (BuildJob, bool, error) {
 	if owner == "" {
 		return BuildJob{}, false, fmt.Errorf("INVALID_INPUT: lease owner required")
 	}
@@ -520,12 +520,13 @@ func (p *Postgres) ClaimJob(ctx context.Context, owner string, lease time.Durati
 			attempts=attempts+1, updated_at=now()
 		WHERE id = (
 			SELECT id FROM build_jobs
-			WHERE status='QUEUED'
-			   OR (status IN ('CLAIMED','RUNNING') AND lease_expires_at < now())
+			WHERE (status='QUEUED'
+			   OR (status IN ('CLAIMED','RUNNING') AND lease_expires_at < now()))
+			  AND ($3 = '' OR verification_id = $3)
 			ORDER BY created_at LIMIT 1
 			FOR UPDATE SKIP LOCKED
 		)
-		RETURNING `+jobColumns, owner, secs).Scan(
+		RETURNING `+jobColumns, owner, secs, verificationID).Scan(
 		&j.ID, &j.VerificationID, &j.BuilderID, &j.Status, &j.Attempts, &j.MaxAttempts,
 		&j.ResultDigest, &j.ResultCommit, &j.Attestation, &j.SignatureValid, &j.ErrorCode, &j.ErrorDetail, &j.LeaseOwner,
 		&j.LeaseExpiresAt, &j.CreatedAt, &j.UpdatedAt)

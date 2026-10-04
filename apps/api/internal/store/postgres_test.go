@@ -142,19 +142,19 @@ func TestPostgresIntegration(t *testing.T) {
 	if err != nil || len(requeued) != 1 || requeued[0].ID != jobs[0].ID {
 		t.Fatal("re-enqueue must converge")
 	}
-	j1, claimed, err := pg.ClaimJob(ctx, "worker-1", time.Second)
+	j1, claimed, err := pg.ClaimJob(ctx, "worker-1", time.Second, "")
 	if err != nil || !claimed || j1.Attempts != 1 {
 		t.Fatalf("claim: %v %v", err, claimed)
 	}
-	if _, claimed, err := pg.ClaimJob(ctx, "worker-2", time.Minute); err != nil || !claimed {
+	if _, claimed, err := pg.ClaimJob(ctx, "worker-2", time.Minute, ""); err != nil || !claimed {
 		t.Fatalf("second claim takes the other job: %v", err)
 	}
-	if _, claimed, _ := pg.ClaimJob(ctx, "worker-3", time.Minute); claimed {
+	if _, claimed, _ := pg.ClaimJob(ctx, "worker-3", time.Minute, ""); claimed {
 		t.Fatal("drained queue must not claim")
 	}
 	// Expire worker-1's lease by waiting, then reclaim.
 	time.Sleep(1100 * time.Millisecond)
-	j1b, claimed, err := pg.ClaimJob(ctx, "worker-3", time.Minute)
+	j1b, claimed, err := pg.ClaimJob(ctx, "worker-3", time.Minute, "")
 	if err != nil || !claimed || j1b.ID != j1.ID || j1b.Attempts != 2 {
 		t.Fatalf("expired lease must be reclaimable: %v %v", err, claimed)
 	}
@@ -165,7 +165,7 @@ func TestPostgresIntegration(t *testing.T) {
 	if _, err := pg.CompleteJob(ctx, j1b.ID, true, "sha256:abc", "abc123", "", "", "", false); err == nil {
 		t.Fatal("terminal job must reject recomplete")
 	}
-	if _, _, err := pg.ClaimJob(ctx, "", time.Minute); err == nil {
+	if _, _, err := pg.ClaimJob(ctx, "", time.Minute, ""); err == nil {
 		t.Fatal("claim without owner must fail")
 	}
 }

@@ -81,7 +81,7 @@ func (e errorStore) ListJobs(ctx context.Context, v string) ([]store.BuildJob, e
 func (e errorStore) GetJob(ctx context.Context, id string) (store.BuildJob, error) {
 	return store.BuildJob{}, e.err
 }
-func (e errorStore) ClaimJob(ctx context.Context, o string, l time.Duration) (store.BuildJob, bool, error) {
+func (e errorStore) ClaimJob(ctx context.Context, o string, l time.Duration, v string) (store.BuildJob, bool, error) {
 	return store.BuildJob{}, false, e.err
 }
 func (e errorStore) CompleteJob(ctx context.Context, id string, ok bool, d, c, ec, ed, attestation string, signatureValid bool) (store.BuildJob, error) {

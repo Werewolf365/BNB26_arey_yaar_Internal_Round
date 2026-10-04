@@ -225,3 +225,36 @@ func TestSignedWorkerAttestationsCanSatisfyQuorum(t *testing.T) {
 		}
 	}
 }
+
+// Scoped claim via API: workers bound to one verification never receive
+// another's jobs; unknown verification id is 404 (typo fails fast).
+func TestClaimScopedToVerification(t *testing.T) {
+	srv := newTestServer(t)
+	rel := createRelease(t, srv, "")
+	mkVer := func() string {
+		code, env := do(t, srv, "POST", "/api/v1/verifications", fmt.Sprintf(`{"releaseId":%q}`, rel), nil)
+		if code != 201 {
+			t.Fatalf("seed: %d", code)
+		}
+		return mustData[map[string]any](t, env)["id"].(string)
+	}
+	va, vb := mkVer(), mkVer()
+	do(t, srv, "POST", "/api/v1/builders", `{"id":"sca","independenceGroup":"g"}`, nil)
+	do(t, srv, "POST", "/api/v1/builders", `{"id":"scb","independenceGroup":"g2"}`, nil)
+	if code, _ := do(t, srv, "POST", "/api/v1/verifications/"+va+"/jobs", `{"builderIds":["sca"]}`, nil); code != 201 {
+		t.Fatalf("enqueue a: %d", code)
+	}
+	if code, _ := do(t, srv, "POST", "/api/v1/verifications/"+vb+"/jobs", `{"builderIds":["scb"]}`, nil); code != 201 {
+		t.Fatalf("enqueue b: %d", code)
+	}
+	code, env := do(t, srv, "POST", "/api/v1/jobs/claim", `{"owner":"wb","verificationId":"`+vb+`"}`, nil)
+	if code != 200 || !strings.Contains(string(env.Data), `"claimed":true`) || !strings.Contains(string(env.Data), `"builderId":"scb"`) {
+		t.Fatalf("scoped claim must take own job: %d %s", code, env.Data)
+	}
+	if code, env := do(t, srv, "POST", "/api/v1/jobs/claim", `{"owner":"wb2","verificationId":"`+vb+`"}`, nil); code != 200 || !strings.Contains(string(env.Data), `"claimed":false`) {
+		t.Fatalf("scoped claim on drained queue: %d %s", code, env.Data)
+	}
+	if code, env := do(t, srv, "POST", "/api/v1/jobs/claim", `{"owner":"wx","verificationId":"ver_nope"}`, nil); code != 404 {
+		t.Fatalf("unknown verification scope must 404, got %d %+v", code, env.Error)
+	}
+}

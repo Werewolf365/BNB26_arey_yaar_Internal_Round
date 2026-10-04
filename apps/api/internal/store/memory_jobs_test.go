@@ -49,24 +49,24 @@ func TestMemoryJobsQueue(t *testing.T) {
 	if _, err := m.GetJob(ctx, "job_nope"); err == nil {
 		t.Fatal("get missing job must fail")
 	}
-	if _, _, err := m.ClaimJob(ctx, "", time.Minute); err == nil {
+	if _, _, err := m.ClaimJob(ctx, "", time.Minute, ""); err == nil {
 		t.Fatal("claim without owner must fail")
 	}
-	j1, claimed, err := m.ClaimJob(ctx, "w1", 30*time.Millisecond)
+	j1, claimed, err := m.ClaimJob(ctx, "w1", 30*time.Millisecond, "")
 	if err != nil || !claimed || j1.LeaseOwner != "w1" || j1.Attempts != 1 {
 		t.Fatalf("claim: %+v %v %v", j1, claimed, err)
 	}
 	// Second worker gets the other job.
-	if _, claimed, err := m.ClaimJob(ctx, "w2", time.Minute); err != nil || !claimed {
+	if _, claimed, err := m.ClaimJob(ctx, "w2", time.Minute, ""); err != nil || !claimed {
 		t.Fatalf("second claim: %v %v", claimed, err)
 	}
 	// Nothing left claimable right now.
-	if _, claimed, err := m.ClaimJob(ctx, "w3", time.Minute); err != nil || claimed {
+	if _, claimed, err := m.ClaimJob(ctx, "w3", time.Minute, ""); err != nil || claimed {
 		t.Fatalf("empty queue must not claim: %v %v", claimed, err)
 	}
 	// After the short lease expires the first job is reclaimable.
 	time.Sleep(50 * time.Millisecond)
-	jr, claimed, err := m.ClaimJob(ctx, "w3", time.Minute)
+	jr, claimed, err := m.ClaimJob(ctx, "w3", time.Minute, "")
 	if err != nil || !claimed || jr.ID != j1.ID || jr.Attempts != 2 {
 		t.Fatalf("expiry reclaim: %+v %v %v", jr, claimed, err)
 	}
@@ -81,7 +81,7 @@ func TestMemoryJobsQueue(t *testing.T) {
 		}
 	}
 	// Claim again (attempts 3) then fail: terminal FAILED.
-	jc, claimed, err := m.ClaimJob(ctx, "w4", time.Minute)
+	jc, claimed, err := m.ClaimJob(ctx, "w4", time.Minute, "")
 	if err != nil || !claimed {
 		t.Fatalf("reclaim: %v %v", claimed, err)
 	}
@@ -146,5 +146,38 @@ func TestMemoryAnchorsAndLists(t *testing.T) {
 	ps, err := m.ListPolicies(ctx)
 	if err != nil || len(ps) != 1 {
 		t.Fatalf("policies: %+v %v", ps, err)
+	}
+}
+
+// Scoped claims isolate verifications: a worker bound to vid-a must never
+// receive vid-b's jobs (reruns and parallel demos coexist safely).
+func TestClaimJobScopedToVerification(t *testing.T) {
+	ctx := context.Background()
+	m := store.NewMemoryStore()
+	va := seedVerification(t, m)
+	vb := seedVerification(t, m)
+	if _, err := m.EnqueueJobs(ctx, va, []string{"ba"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.EnqueueJobs(ctx, vb, []string{"bb"}); err != nil {
+		t.Fatal(err)
+	}
+	// Unscoped still works (backward compatible): takes oldest overall.
+	if _, claimed, err := m.ClaimJob(ctx, "w-any", time.Minute, ""); err != nil || !claimed {
+		t.Fatalf("unscoped claim: %v %v", claimed, err)
+	}
+	// Scoped to vb skips va's leftovers and takes vb's job.
+	j, claimed, err := m.ClaimJob(ctx, "w-b", time.Minute, vb)
+	if err != nil || !claimed || j.VerificationID != vb {
+		t.Fatalf("scoped claim must take own verification's job: %+v %v %v", j, claimed, err)
+	}
+	// Scoped to a drained verification claims nothing (never another's job).
+	if _, claimed, err := m.ClaimJob(ctx, "w-a2", time.Minute, vb); err != nil || claimed {
+		t.Fatalf("scoped claim on drained queue must not claim: %v %v", claimed, err)
+	}
+	// Unknown scope is simply empty (server maps to 404 before reaching here,
+	// but the store must never leak across scopes).
+	if _, claimed, err := m.ClaimJob(ctx, "w-x", time.Minute, "ver_nope"); err != nil || claimed {
+		t.Fatalf("unknown scope must not claim: %v %v", claimed, err)
 	}
 }

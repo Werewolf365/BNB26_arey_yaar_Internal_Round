@@ -1,0 +1,20 @@
+{
+  "name": "quorum-demo-c",
+  "description": "Minimal C project for Quorum source-archive verification",
+  "repo": "https://github.com/Kashaan-Ekhlas/quorum-demo-c.git",
+  "webRepo": "https://github.com/Kashaan-Ekhlas/quorum-demo-c",
+  "tag": "v0.1.0",
+  "commit": "233a039872127d8212921a7504cd4700718b99fa",
+  "package": "quorum-demo-c",
+  "ecosystem": "c",
+  "version": "0.1.0",
+  "build": {
+    "kind": "git-archive",
+    "notes": "Builders reproduce git archive bytes for the pinned commit. This verifies source-archive integrity, not compiled-binary reproducibility."
+  },
+  "builders": [
+    {"suffix": "a", "group": "operator-a", "owner": "operator-a"},
+    {"suffix": "b", "group": "operator-b", "owner": "operator-b"},
+    {"suffix": "c", "group": "operator-c", "owner": "operator-c"}
+  ]
+}

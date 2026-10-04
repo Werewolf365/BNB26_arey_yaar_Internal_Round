@@ -117,9 +117,11 @@ curl -X POST localhost:8080/api/v1/verifications -H 'Content-Type: application/j
   -d '{"releaseId":"'$REL'","evidence":[]}'     # -> ver_… (INSUFFICIENT until jobs land)
 curl -X POST localhost:8080/api/v1/verifications/$VER/jobs -H 'Content-Type: application/json' \
   -d '{"builderIds":["builder-a"]}'
-./quorum-worker --api http://localhost:8080 --owner operator-a --signing-key b-a.pem --once
+./quorum-worker --api http://localhost:8080 --owner operator-a --signing-key b-a.pem --verification $VER --once
 # repeat enqueue+worker for b, then c (one builder queued at a time so each
-# key provably signs its own builder's attestation)
+# key provably signs its own builder's attestation; --verification scopes
+# each claim to this verification, so stale QUEUED jobs from older runs are
+# never touched — reruns are safe without wiping the database)
 curl localhost:8080/api/v1/verifications/$VER/jobs
 ```
 

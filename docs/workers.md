@@ -6,12 +6,16 @@ It reports bytes; the quorum engine decides.
 ## Loop
 
 ```
-POST /jobs/claim {owner}  →  GET verification → GET release (repo, commit)
-→ fetch pinned commit (host git, allowlisted remote only)
+POST /jobs/claim {owner, verificationId?}  →  GET verification → GET release (repo, commit)
+→ fetch pinned commit (host git, allowlisted remote only; GIT_TERMINAL_PROMPT=0, never prompts)
 → isolated rebuild: docker run --rm --network none -v src:/src:ro <image>
-  sh -c "git -C /src archive <commit> | sha256sum"
+  sh -c "git -c safe.directory=/src -C /src archive <commit> > /tmp/quorum-archive.tar && sha256sum /tmp/quorum-archive.tar"
 → POST /jobs/:id/complete {ok, digest, commit, ...}
 ```
+
+The optional `verificationId` (worker flag `--verification`) scopes the claim
+to one verification's queue, so parallel demos and reruns never touch each
+other's jobs; unknown ids 404. Fetches are non-interactive and bounded.
 
 API auto-evaluates when all sibling jobs are terminal: succeeded digests become
 evidence (groups from the builder registry), failures become visible reasons,

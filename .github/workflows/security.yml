@@ -1,0 +1,40 @@
+name: security
+on: [push, pull_request]
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.27.1' } # pinned; must match go.mod toolchain
+      - run: go version
+      - run: node scripts/scan.mjs
+      - run: node scripts/sbom.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: |
+            sbom.json
+            sbom.syft.json
+          if-no-files-found: warn
+  mutation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.27.1' }
+      - run: node scripts/mutate.mjs
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.27.1' }
+      - run: go test -count=1 -fuzz FuzzEvaluateDeterminism -fuzztime 60s ./services/policy/
+      - run: go test -count=1 -fuzz FuzzConflictVisibility -fuzztime 60s ./services/policy/
+      - run: go test -count=1 -fuzz FuzzIndependenceInvariant -fuzztime 30s ./services/policy/
+      - run: go test -count=1 -fuzz FuzzMarshalStability -fuzztime 30s ./services/canonical/

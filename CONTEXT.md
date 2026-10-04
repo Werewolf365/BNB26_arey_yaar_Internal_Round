@@ -142,3 +142,76 @@ this point.
   by another project here), api `/health` + `/ready` ok, `POST /releases`
   201 persisted to Postgres, audit chain appended, web `/` 200 with title.
   Test api/web containers removed afterwards; postgres/anvil left running.
+
+## Change log — 2026-10-04: web detail routes + trust governance + E2E demo + supply-chain gates
+
+- Web: shared `src/lib/api.ts` + `src/components/ui.tsx`; routes `/releases`,
+  `/releases/[id]`, `/verifications/[id]` (decision, counted/excluded,
+  conflicts, jobs, anchor), `/builders`, `/policies`, `/audit`, `/evidence`
+  explorer (metadata + hash-verified blob links). Overview verification lookup
+  replaces the hard-coded `setEvidence([])`. Playwright
+  (`playwright.config.ts`, `tests/e2e/dashboard.spec.ts`, chromium + mobile):
+  14/14 vs the compose prod build. Upgraded Next 14.2.23 -> 15.5.27
+  (critical CVEs), React 19, postcss `overrides` pin; `npm audit` 0 vulns.
+- Fulcio/Rekor governance: `services/cosign/trust.go` (TrustRoot JSON +
+  `QUORUM_TRUST_ROOT`, exact/regexp identities, Rekor-required fail-closed),
+  `attest cosign-verify-attestation --trust-root/--rekor-entry`,
+  `fixtures/trust-root.example.json`, trust unit tests + CLI matrix. Keyless
+  without a root passes through to cosign Fulcio validation (additive).
+- Fuzz (`services/policy/quorum_fuzz_test.go`,
+  `services/canonical/canonical_fuzz_test.go`, `make fuzz`, CI 60s runs):
+  determinism, independence, conflict-visibility, canonical stability —
+  6M+ execs clean AFTER fixing a real bug fuzz found: empty-digest evidence
+  counted toward quorum (excluded with reason now, Go + Node mirror +
+  `TestMalformedEvidenceExcluded` + Node mirror tests).
+- Mutation (`scripts/mutate.mjs`, `make mutation`, test-all + CI): 6/6 killed;
+  2 initial survivors led to new tiebreak + tolerance-zero tests.
+- Supply chain: `scripts/sbom.mjs` (`make sbom`, syft-or-inventory),
+  `make sign` (cosign, SKIP when absent), `scripts/scan.mjs` (`make scan`:
+  vet + govulncheck + npm audit + secret-grep, all green),
+  `.github/workflows/security.yml` (scan/mutation/fuzz), CI web job
+  (typecheck/build/Playwright), `make test-web`.
+- E2E: `scripts/demo-e2e.mjs` (`make demo`, old script kept as
+  `make demo-slice`): deterministic core + CLI exit matrix + attest replay
+  rejection + API VERIFIED/INVESTIGATE/blob/audit + jobs with unsigned-settles-
+  INSUFFICIENT_EVIDENCE assertion + live anchor-or-SKIP. ALL PHASES PASS vs
+  compose stack.
+- Matrices: REQ-030…036 appended to `docs/testing/REQUIREMENT-MATRIX.md`;
+  `docs/attestations.md` (trust roots), `docs/demo.md` (E2E), README
+  rewritten sections.
+
+## Change log — 2026-10-04: gate-verification pass (Makefile fix + live proofs)
+
+- Fixed duplicate `test-integration` Makefile target (second definition was
+  silently overriding the first and dropping the `go test` integration run;
+  consolidated to one recipe: `compose up -d postgres anvil` + Postgres +
+  Anvil live tests). `make -n test-integration` confirms a single recipe.
+- Live anchor proof vs compose Anvil (`eth_blockNumber` 0xf, chain live):
+  `QUORUM_LIVE_ANVIL=1 go test -run TestAnchorLive` deploys + anchors +
+  re-reads + duplicate-revert check. Independent `cast` re-verification
+  (deploy tx, `recordVerification` tx, receipt status/block, event logs)
+  recorded below; foundry 1.8.1 needs `--mnemonic` (raw `--private-key`
+  hex rejected by this build).
+- Re-ran separate gates individually: `make sbom`, `make sign`, `make scan`,
+  Playwright vs live stack, live cosign/Rekor probe results recorded below
+  (env-gated paths report SKIP with reason when binaries/network absent —
+  never faked).
+- Live anchor receipts (compose Anvil, chainId 31337, foundry 1.8.1 —
+  raw `--private-key` hex rejected by this build, `--mnemonic` used):
+  deploy tx `0xc2c22f82dbe5f2a0e29cc905b83530e6a6a654ef4df2ab1a715de7d7c8477b27`
+  status 1 -> contract `0x68B1D87F95878fE05B998F19b66F4baba5De1aed`;
+  `recordVerification` tx
+  `0x867eae1f7a38dfafe01e3feb9bca7ffb03451a3594758e87ad082800793259d5`
+  block 20 status 1 with `VerificationAnchored` event (verificationId
+  `0xaaaa…` as topic); independent re-read `anchored(0xaaaa…) == true`.
+  `QUORUM_LIVE_ANVIL=1 go test -run TestAnchorLive` also green
+  (deploy + anchor + event + duplicate-revert).
+- Separate gates, run individually (not covered by `test-all` by design):
+  `make sbom` -> 166-entry module inventory (syft absent, honest fallback);
+  `make sign` -> explicit `[sign] SKIP: cosign absent` (fixed recipe that
+  previously swallowed its own SKIP behind a pipe); `make scan` green
+  (vet, govulncheck 0 vulns, npm audit web PASS, secret-grep PASS);
+  Playwright 14/14 vs live compose stack; live Rekor
+  `TestLiveRekorLiveness` PASS + CLI `rekor-get` bogus UUID -> live
+  `NOT_FOUND` exit 1; live cosign sign/attest round-trips SKIP (no binary —
+  deterministic stub path covers the logic in `test-all`).

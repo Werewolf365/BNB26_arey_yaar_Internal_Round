@@ -34,6 +34,7 @@ export function evaluate(policy, expectedSource, evidence) {
   const seen = new Set();
   const eligible = [];
   for (const e of sorted) {
+    if (!e.builderId || !e.independenceGroup || !e.artifactDigest) { res.excludedEvidence.push({ evidence: e, reason: "malformed evidence: builder id, independence group and artifact digest are all required" }); continue; }
     if (seen.has(e.builderId)) { res.excludedEvidence.push({ evidence: e, reason: "duplicate builder id: evidence not double-counted" }); continue; }
     seen.add(e.builderId);
     if (allowed.size > 0 && !allowed.has(e.verificationSource)) { res.excludedEvidence.push({ evidence: e, reason: "verification source not allowed by policy" }); continue; }

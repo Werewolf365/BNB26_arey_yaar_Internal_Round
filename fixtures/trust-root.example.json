@@ -1,0 +1,7 @@
+{
+  "_comment": "Quorum operator trust root for keyless (Fulcio/OIDC) verification. Copy, edit, and pass via --trust-root or QUORUM_TRUST_ROOT=@path. Identities accept exact strings or regexp:... patterns.",
+  "allowedIssuers": ["https://token.actions.githubusercontent.com"],
+  "allowedIdentities": ["regexp:^https://github.com/myorg/.*"],
+  "rekorUrl": "",
+  "requireRekor": false
+}

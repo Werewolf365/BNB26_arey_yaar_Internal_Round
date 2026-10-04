@@ -370,6 +370,12 @@ func newCosignAttestBlobCmd() *cobra.Command {
 // certificates (non-interactive). --signature is Quorum's flag name for the
 // bundle file cosign reads (--bundle upstream). --rekor-url is an opt-in
 // passthrough for older cosign CLIs and is omitted when empty.
+//
+// Operator governance: --trust-root (JSON file, or QUORUM_TRUST_ROOT env)
+// names the trusted Fulcio issuers/identities and whether Rekor inclusion is
+// required. Keyless requests are authorized against the root BEFORE the CLI
+// runs; unlisted identities fail closed. With requireRekor, --rekor-entry
+// (UUID) must confirm inclusion or the result degrades to UNAVAILABLE.
 func newCosignVerifyAttestationCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "cosign-verify-attestation --artifact FILE --signature BUNDLE",
@@ -381,6 +387,8 @@ func newCosignVerifyAttestationCmd() *cobra.Command {
 			identity, _ := cmd.Flags().GetString("certificate-identity")
 			issuer, _ := cmd.Flags().GetString("certificate-oidc-issuer")
 			rekorURL, _ := cmd.Flags().GetString("rekor-url")
+			rekorEntry, _ := cmd.Flags().GetString("rekor-entry")
+			trustRootPath, _ := cmd.Flags().GetString("trust-root")
 			bin, _ := cmd.Flags().GetString("cosign-bin")
 			if artifact == "" || sigPath == "" {
 				emitErr(cmd, "--artifact and --signature are required")
@@ -391,13 +399,26 @@ func newCosignVerifyAttestationCmd() *cobra.Command {
 				emitErr(cmd, "one trust anchor is required: --key or --certificate-identity plus --certificate-oidc-issuer")
 				return &exitErr{code: exitcodes.InvalidInput}
 			}
+			root, err := qcosign.LoadTrustRoot(trustRootPath)
+			if err != nil {
+				emitErr(cmd, err.Error())
+				return &exitErr{code: exitcodes.InvalidInput}
+			}
+			if trustRootPath == "" {
+				if envRoot, envErr := qcosign.TrustRootFromEnv(); envErr != nil {
+					emitErr(cmd, envErr.Error())
+					return &exitErr{code: exitcodes.InvalidInput}
+				} else {
+					root = envRoot
+				}
+			}
 			p := qcosign.DefaultProvider()
 			if bin != "" {
 				p.Bin = bin
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 			defer cancel()
-			res := p.VerifyBlobAttestation(ctx, opts, artifact, sigPath)
+			res := p.VerifyAttestationWithTrust(ctx, root, opts, artifact, sigPath, rekorEntry)
 			if res.State != qcosign.StateVerified {
 				emitErr(cmd, res.Detail)
 				return &exitErr{code: cosignExit(res.State)}
@@ -411,6 +432,8 @@ func newCosignVerifyAttestationCmd() *cobra.Command {
 	c.Flags().String("certificate-identity", "", "Fulcio certificate identity for keyless verification")
 	c.Flags().String("certificate-oidc-issuer", "", "Fulcio OIDC issuer for keyless verification")
 	c.Flags().String("rekor-url", "", "rekor base URL passthrough for older cosign CLIs (default: omitted)")
+	c.Flags().String("rekor-entry", "", "rekor entry UUID for inclusion check (required when the trust root enforces Rekor)")
+	c.Flags().String("trust-root", "", "operator trust-root JSON file (default: QUORUM_TRUST_ROOT env or deny-all for keyless)")
 	c.Flags().String("cosign-bin", "", "cosign executable (default: PATH lookup)")
 	return c
 }

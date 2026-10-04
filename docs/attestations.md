@@ -48,3 +48,16 @@
 - Verification binds: source commit + artifact digest + builder id + build procedure +
   timestamp. Preserve raw envelope; never mutate signed bytes. Replay onto a different
   artifact/commit/release must fail with explicit reason.
+- **Operator trust roots (keyless Fulcio/Rekor governance):**
+  `services/cosign/trust.go` — `TrustRoot{allowedIssuers, allowedIdentities
+  (exact or regexp:...), rekorUrl, requireRekor}`, loaded from
+  `--trust-root FILE` or `QUORUM_TRUST_ROOT` (inline JSON or `@path`).
+  Copy `fixtures/trust-root.example.json` to start.
+  `attest cosign-verify-attestation` authorizes the keyless identity against
+  the root BEFORE shelling cosign: unlisted issuer/identity fails closed
+  (`SIGNER_NOT_TRUSTED`, exit 1). Without a root, keyless verification passes
+  through to cosign's own Fulcio chain validation (additive, never weaker).
+  With `requireRekor: true`, `--rekor-entry UUID` must confirm log inclusion
+  against the root's `rekorUrl` (default the public-good log) or the result
+  degrades to `UNAVAILABLE` (exit 4) — never VERIFIED without the required
+  transparency evidence.

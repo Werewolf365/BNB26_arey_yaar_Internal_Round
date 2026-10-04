@@ -75,3 +75,34 @@ test("invalid policy -> ERROR (never silent reject)", () => {
   const r = evaluate(bad, SRC, []);
   assert.equal(r.decision, "ERROR");
 });
+
+test("malformed evidence excluded, never verifies (fuzz-found)", () => {
+  const r = evaluate(base(), SRC, [
+    ev("", "cloud-a", D("a".repeat(64))),
+    ev("builder-b", "", D("a".repeat(64))),
+    ev("builder-c", "cloud-c", ""),
+  ]);
+  assert.notEqual(r.decision, "VERIFIED");
+  assert.notEqual(r.decision, "VERIFIED_WITH_CONFLICT");
+  assert.equal(r.countedEvidence.length + r.excludedEvidence.length, 3);
+});
+
+test("tiebreak: equal counts resolve to lowest digest", () => {
+  const p = base(); p.minBuilders = 4;
+  const d1 = D("a"), d2 = D("z");
+  const r = evaluate(p, SRC, [
+    ev("builder-a", "cloud-a", d1), ev("builder-b", "cloud-b", d1),
+    ev("builder-c", "cloud-c", d2), ev("builder-d", "cloud-d", d2),
+  ]);
+  assert.equal(r.countedEvidence.length, 2);
+  assert.equal(r.countedEvidence[0].artifactDigest, d1);
+  assert.equal(r.conflicts.length, 1);
+  assert.equal(r.conflicts[0].digest, d2);
+});
+
+test("zero conflicts with tolerance 0 is VERIFIED", () => {
+  const p = base(); p.conflictTolerance = 0;
+  const d = D("a".repeat(64));
+  const r = evaluate(p, SRC, [ev("builder-a", "cloud-a", d), ev("builder-b", "cloud-b", d)]);
+  assert.equal(r.decision, "VERIFIED");
+});

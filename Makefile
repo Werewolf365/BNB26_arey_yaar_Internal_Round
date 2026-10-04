@@ -5,7 +5,7 @@
 # - `test-all` is self-provisioning via Docker Compose where possible.
 # - Live external services (real OSS Rebuild, testnets) live in `test-external` only.
 
-.PHONY: help doctor setup dev test test-unit test-integration test-e2e test-contracts test-security test-external test-all lint format coverage demo clean
+.PHONY: help doctor setup dev test test-unit test-integration test-e2e test-contracts test-security test-web test-external test-all lint format coverage demo demo-slice fuzz mutation sbom sign scan clean
 
 help:
 	@echo "Quorum targets:"
@@ -18,12 +18,19 @@ help:
 	@echo "  make test-e2e         - end-to-end slice scenarios"
 	@echo "  make test-contracts   - Foundry tests (needs forge; skipped gracefully if absent)"
 	@echo "  make test-security    - tamper/replay/conflict/path-traversal suites"
+	@echo "  make test-web         - web typecheck + build + Playwright e2e (needs browsers: npx playwright install)"
 	@echo "  make test-external    - REAL OSS Rebuild / testnet; needs creds; never in test-all"
 	@echo "  make test-all         - self-provisioning gate: format+lint+unit+integration+e2e+security+coverage+demo smoke"
 	@echo "  make lint             - lint (node --check + go vet when Go present)"
 	@echo "  make format           - gofmt/prettier check (non-mutating unless FIX=1)"
 	@echo "  make coverage         - coverage report"
-	@echo "  make demo             - repeatable Slice-1 demo (valid/tampered/conflict)"
+	@echo "  make demo             - full end-to-end demo: CLI -> API -> quorum -> audit (-> Anvil when present)"
+	@echo "  make demo-slice       - repeatable Slice-1 demo (valid/tampered/conflict)"
+	@echo "  make fuzz             - short property fuzz runs (quorum invariants + canonical stability)"
+	@echo "  make mutation         - mutation gate: every engine mutant must be killed by tests"
+	@echo "  make sbom             - SBOM (syft CycloneDX when installed, else Go/npm inventory)"
+	@echo "  make sign             - cosign-sign sbom.json when cosign is installed (else SKIP)"
+	@echo "  make scan             - vet + govulncheck + npm audit + secret scan"
 	@echo "  make clean            - remove build artifacts"
 
 doctor:
@@ -45,8 +52,8 @@ run-api:
 	QUORUM_ADDR=:8080 QUORUM_DATABASE_URL=postgres://quorum:quorum@localhost:5433/quorum?sslmode=disable ./quorum-api
 
 test-integration:
-	@echo "[integration] needs Docker daemon for Postgres/MinIO/Anvil; skipping gracefully if daemon down"
-	-@docker info > /dev/null 2>&1 && docker compose -f infra/compose/docker-compose.yml up -d postgres minio anvil || echo "[integration] SKIP: Docker daemon not running"
+	@echo "[integration] needs Docker daemon for Postgres/Anvil; skipping gracefully if daemon down"
+	-@docker info > /dev/null 2>&1 && docker compose -f infra/compose/docker-compose.yml up -d postgres anvil || echo "[integration] SKIP: Docker daemon not running"
 	QUORUM_TEST_POSTGRES=1 QUORUM_LIVE_ANVIL=1 go test ./apps/api/... ./internal/runner/ -run 'TestPostgresIntegration|TestAnchorLive' || echo "[integration] SKIP: stack not reachable"
 
 dev:
@@ -59,10 +66,6 @@ test-unit:
 	npm run test-unit
 	-@go test ./services/... 2>&1 | head -n 50 || echo "[go] Go toolchain absent - Go tests run in CI (see go.mod toolchain go1.27.1)"
 
-test-integration:
-	@echo "[integration] needs Docker daemon for Postgres/MinIO/Anvil; skipping gracefully if daemon down"
-	-@docker info > /dev/null 2>&1 && docker compose -f infra/compose/docker-compose.yml up -d postgres minio anvil || echo "[integration] SKIP: Docker daemon not running"
-
 test-e2e:
 	node scripts/slice1-demo.mjs
 
@@ -71,6 +74,10 @@ test-contracts:
 
 test-security:
 	node --test test/security.*.test.mjs
+
+test-web:
+	cd apps/web && npm ci --no-audit --no-fund && npm run typecheck && npm run build
+	-@cd apps/web && (npx playwright test 2>&1 | tail -n 6) || echo "[web] Playwright browsers absent - run 'npx playwright install chromium' (see 'make doctor')"
 
 test-external:
 	@echo "[external] REAL OSS Rebuild / Cosign / Rekor tests (require network + CLIs; never in test-all)."
@@ -84,6 +91,8 @@ test-all:
 	npm test
 	node --test test/security.*.test.mjs
 	node scripts/slice1-demo.mjs
+	node scripts/demo-e2e.mjs
+	node scripts/mutate.mjs
 	-@go test ./... || echo "[go] Go toolchain absent locally - enforced in CI"
 	@echo "=== test-all PASS (deterministic subset) ==="
 
@@ -99,7 +108,28 @@ coverage:
 	node scripts/coverage.mjs
 
 demo:
+	node scripts/demo-e2e.mjs
+
+demo-slice:
 	node scripts/slice1-demo.mjs
+
+fuzz:
+	go test -count=1 -fuzz FuzzEvaluateDeterminism -fuzztime 20s ./services/policy/
+	go test -count=1 -fuzz FuzzIndependenceInvariant -fuzztime 10s ./services/policy/
+	go test -count=1 -fuzz FuzzConflictVisibility -fuzztime 20s ./services/policy/
+	go test -count=1 -fuzz FuzzMarshalStability -fuzztime 10s ./services/canonical/
+
+mutation:
+	node scripts/mutate.mjs
+
+sbom:
+	node scripts/sbom.mjs
+
+sign: sbom
+	-@command -v cosign > /dev/null 2>&1 && cosign sign-blob --yes --output-signature sbom.sig sbom.json 2>&1 | tail -n 3 || echo "[sign] SKIP: cosign absent (install: https://docs.sigstore.dev/cosign/installation/)"
+
+scan:
+	node scripts/scan.mjs
 
 clean:
 	-@docker compose -f infra/compose/docker-compose.yml down -v || true

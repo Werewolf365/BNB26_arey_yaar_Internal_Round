@@ -90,3 +90,54 @@ func TestDuplicateBuilder(t *testing.T) {
 		t.Fatalf("duplicate evidence must be excluded with reason")
 	}
 }
+
+// Malformed evidence (empty id/group/digest) is excluded with a reason and
+// can never satisfy a quorum — found by FuzzConflictVisibility.
+func TestMalformedEvidenceExcluded(t *testing.T) {
+	p := basePolicy()
+	got := policy.Evaluate(p, "abc123", []policy.Evidence{
+		{BuilderID: "", IndependenceGroup: "cloud-a", SourceCommit: "abc123", ArtifactDigest: "sha256:abc", SignatureValid: true, VerificationSource: "builder"},
+		{BuilderID: "builder-b", IndependenceGroup: "", SourceCommit: "abc123", ArtifactDigest: "sha256:abc", SignatureValid: true, VerificationSource: "builder"},
+		{BuilderID: "builder-c", IndependenceGroup: "cloud-c", SourceCommit: "abc123", ArtifactDigest: "", SignatureValid: true, VerificationSource: "builder"},
+	})
+	if got.Decision == policy.DecisionVerified || got.Decision == policy.DecisionVerifiedConflict {
+		t.Fatalf("malformed evidence must never verify, got %s", got.Decision)
+	}
+	if len(got.CountedEvidence)+len(got.ExcludedEvidence) != 3 {
+		t.Fatalf("all malformed inputs must be accounted for: %+v", got)
+	}
+}
+
+// Tiebreak: equal group counts resolve to the lowest digest (deterministic).
+// Kills the `>` -> `>=` mutant which would hand victory to the last digest.
+func TestTiebreakLowestDigestWins(t *testing.T) {
+	p := basePolicy()
+	p.MinBuilders = 4
+	d1, d2 := "sha256:aaa", "sha256:zzz"
+	got := policy.Evaluate(p, "abc123", []policy.Evidence{
+		ev("builder-a", "cloud-a", d1),
+		ev("builder-b", "cloud-b", d1),
+		ev("builder-c", "cloud-c", d2),
+		ev("builder-d", "cloud-d", d2),
+	})
+	if len(got.CountedEvidence) != 2 || got.CountedEvidence[0].ArtifactDigest != d1 {
+		t.Fatalf("tie must resolve to lowest digest, got %+v", got.CountedEvidence)
+	}
+	if len(got.Conflicts) != 1 || got.Conflicts[0].Digest != d2 {
+		t.Fatalf("loser must surface as conflict, got %+v", got.Conflicts)
+	}
+}
+
+// Zero conflicts with tolerance 0 is plain VERIFIED, not WITH_CONFLICT.
+// Kills the `<=` -> `<` mutant on the no-conflict branch.
+func TestZeroConflictToleranceZeroIsVerified(t *testing.T) {
+	p := basePolicy()
+	p.ConflictTolerance = 0
+	got := policy.Evaluate(p, "abc123", []policy.Evidence{
+		ev("builder-a", "cloud-a", "sha256:abc"),
+		ev("builder-b", "cloud-b", "sha256:abc"),
+	})
+	if got.Decision != policy.DecisionVerified {
+		t.Fatalf("expected VERIFIED, got %s (%v)", got.Decision, got.Reasons)
+	}
+}

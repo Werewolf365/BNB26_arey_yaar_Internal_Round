@@ -16,3 +16,8 @@ contracts/cache/
 **/tsconfig.tsbuildinfo
 builders.json
 quorum.yaml
+sbom.json
+sbom.syft.json
+sbom.sig
+apps/web/test-results/
+apps/web/playwright-report/

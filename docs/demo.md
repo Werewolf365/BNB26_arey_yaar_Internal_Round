@@ -1,4 +1,23 @@
-# Demo (Slice 1)
+# Demo
+
+## Full E2E (`make demo` -> `scripts/demo-e2e.mjs`)
+
+Five phases, repeatable, temp keys/files cleaned up; API/Anvil phases SKIP
+with reasons when the stack is down (never faked), `--strict` turns skips
+into failures:
+
+1. deterministic core (VERIFIED / conflict-surfaced / audit-ok, no binaries)
+2. CLI matrix (verify exits 0/1/3, audit ok/tampered, attest round-trip +
+   wrong-commit replay rejection)
+3. API loop vs `QUORUM_API_BASE` (builders, release, VERIFIED verification,
+   INVESTIGATE disagreement case, evidence blob hash round-trip, audit read)
+4. job queue (enqueue, two worker claim/complete, unsigned completions settle
+   INSUFFICIENT_EVIDENCE — signatures required, correctly)
+5. chain anchor (live `TestAnchorLive` when Anvil is up, else SKIP)
+
+`make demo-slice` keeps the original three-scenario Slice-1 script.
+
+## Slice 1 (`node scripts/slice1-demo.mjs`)
 
 ```powershell
 node scripts/slice1-demo.mjs

@@ -114,6 +114,10 @@ func Evaluate(policy Policy, expectedSource string, evidence []Evidence) Result 
 	seenBuilder := map[string]bool{}
 	var eligible []Evidence
 	for _, e := range sorted {
+		if e.BuilderID == "" || e.IndependenceGroup == "" || e.ArtifactDigest == "" {
+			res.ExcludedEvidence = append(res.ExcludedEvidence, ExcludedItem{e, "malformed evidence: builder id, independence group and artifact digest are all required"})
+			continue
+		}
 		if seenBuilder[e.BuilderID] {
 			res.ExcludedEvidence = append(res.ExcludedEvidence, ExcludedItem{e, "duplicate builder id: evidence not double-counted"})
 			continue

@@ -8,17 +8,20 @@ attestations (SLSA v1.2), tamper-evident audit, and optional EVM anchoring.
 
 ## Status
 
-Working: quorum engine (Go source of truth + Node mirror, conformance-locked),
-Cobra CLI, REST API (memory + Postgres), worker + job queue with signed
+Working: quorum engine (Go source of truth + Node mirror, conformance-locked,
+fuzz-hardened — fixed an empty-digest counting bug found by fuzz), Cobra CLI
+with operator trust-root governance (`--trust-root`/`QUORUM_TRUST_ROOT`,
+`--rekor-entry`), REST API (memory + Postgres), worker + job queue with signed
 attestations, DSSE/local P-256 + real Cosign/Rekor paths, OSS Rebuild
 fixture + live adapters, content-addressed storage (fs + S3-compat),
-`QuorumAnchor.sol` (hash-only) + Anvil flow, audit hash chain, Next.js
-dashboard (overview only), Docker Compose stack, CI.
+`QuorumAnchor.sol` (hash-only) + Anvil flow, audit hash chain, Next.js 15
+dashboard (overview + releases/builders/policies/audit/evidence +
+verification detail with counted/excluded/conflicts + Playwright suite
+14/14), full `make demo` E2E, SBOM/signing/scans, mutation gate (6/6 killed),
+Docker Compose one-command stack, CI (+ security/mutation/fuzz/web jobs).
 
-Not yet: full dashboard (release/builder/policy/audit detail pages,
-Playwright), remote/fleet builders, SBOM/signing/scans of Quorum itself,
-public testnet deployment, `make demo` full E2E. See "What's lacking" below
-and `docs/limitations.md`.
+Not yet: remote/fleet builders, public testnet deployment, quotas beyond
+caps, k8s manifests. See "What's lacking" below and `docs/limitations.md`.
 
 ## Architecture
 
@@ -42,11 +45,14 @@ quorum policy eval (`VERIFIED` / `VERIFIED_WITH_CONFLICT` / `REJECTED` /
 - `apps/cli/` — Cobra CLI (`docs/cli.md`), entry `main.go`, commands in `cmd/`
 - `apps/api/` — REST API `:8080` (`docs/api.md`); `main.go` + `internal/server/` + `internal/store/` (memory/postgres + migrations)
 - `apps/worker/` — rebuild daemon: claim job → Docker `--network none` rebuild → signed report (`docs/workers.md`)
-- `apps/web/` — Next.js 14 dashboard (`src/app/page.tsx`, single overview page)
+- `apps/web/` — Next.js 15 dashboard: overview + `/releases`, `/releases/[id]`,
+  `/verifications/[id]` (decision, counted/excluded, conflicts, jobs, anchor),
+  `/builders`, `/policies`, `/audit`, `/evidence` explorer; Playwright suite
+  (`tests/e2e`, chromium + mobile)
 - `services/policy/` — quorum engine: `quorum.go` (truth, Go) + `quorum.mjs` (mirror, locked via `packages/fixtures/conformance.json`)
 - `services/canonical/` — canonical JSON for hashing
 - `services/attestation/` + `services/sigstore/` — DSSE + in-toto + SLSA v1.2 sign/verify (test P-256 keys; Cosign later/live)
-- `services/cosign/` — real `cosign` CLI + Rekor adapter (stub default, live via `QUORUM_LIVE_COSIGN=1`)
+- `services/cosign/` — real `cosign` CLI + Rekor adapter (stub default, live via `QUORUM_LIVE_COSIGN=1`) + operator trust roots (`trust.go`: Fulcio issuer/identity allowlist, Rekor-required; `--trust-root`, `QUORUM_TRUST_ROOT`, `fixtures/trust-root.example.json`)
 - `services/ossrebuild/` (+ `services/oss-rebuild/adapter.mjs`) — OSS Rebuild CLI adapter, fixture default, live opt-in
 - `services/audit/` (`chain.mjs`) + `internal/runner/audit.go` — append-only hash chain `H(prev||canonical(payload))`
 - `services/storage/` — fs backend + S3-compat backend (in-file SigV4)
@@ -56,7 +62,7 @@ quorum policy eval (`VERIFIED` / `VERIFIED_WITH_CONFLICT` / `REJECTED` /
 - `contracts/src/QuorumAnchor.sol` — hash-only anchor + `VerificationAnchored` event; `test/QuorumAnchor.t.sol`
 - `packages/schemas/` + `packages/fixtures/conformance.json` — JSON schemas + Go/Node vectors
 - `infra/compose/docker-compose.yml` — postgres + S3 (LocalStack) + Anvil; `infra/docker/builder.Dockerfile`
-- `scripts/` — `doctor.js` (detect-only), `slice1-demo.mjs` (3 scenarios), `coverage.mjs` (90/95 gates)
+- `scripts/` — `doctor.js` (detect-only), `slice1-demo.mjs` (3 scenarios), `demo-e2e.mjs` (full E2E: CLI→API→quorum→audit→chain), `coverage.mjs` (90/95 gates), `mutate.mjs` (engine mutation gate), `sbom.mjs`, `scan.mjs`
 - `fixtures/` — `tiny-package/`, `conflicting-builders/`, `mismatch/`
 - `docs/` — architecture, api, cli, blockchain, demo, limitations, testing matrices, HANDOFF
 
@@ -73,8 +79,11 @@ node scripts/doctor.js   # detection only; prints install hints, installs nothin
 
 ```bash
 export PATH="$HOME/.nvm/versions/node/v20.20.0/bin:$PATH"  # if node is via nvm
-npm test                        # 21 unit/security/conformance tests
+npm test                        # 24 unit/security/conformance tests
 node scripts/slice1-demo.mjs    # VERIFIED / REJECTED / VERIFIED_WITH_CONFLICT + audit OK
+node scripts/demo-e2e.mjs       # full E2E (needs API up for phases 3-5, else SKIP)
+node scripts/mutate.mjs         # mutation gate: 6/6 engine mutants killed
+node scripts/scan.mjs           # vet + govulncheck + npm audit + secret scan
 go test ./...                   # full Go suite
 go build -o quorum ./apps/cli && ./quorum verify --repo https://github.com/example/tiny --commit abc123 --fixture-tiny
 ```
@@ -151,7 +160,10 @@ curl -X POST localhost:8080/api/v1/releases -H 'X-Api-Key: dev-admin-key' -H 'Co
   -d '{"package":"tiny","ecosystem":"demo","name":"tiny","version":"1","repo":"https://github.com/example/tiny","commit":"abc123"}'
 curl 'localhost:8080/api/v1/audit?limit=20'
 
-# then open http://localhost:3000 — hero cards + releases/builders/policies/audit sections
+# then open http://localhost:3000 — overview cards, verification lookup,
+# and detail routes: /releases, /releases/:id, /verifications/:id (decision +
+# counted/excluded/conflicts + jobs + anchor), /builders, /policies, /audit,
+# /evidence explorer (blob metadata + hash-verified download links)
 ```
 
 CORS: API defaults to allowing `http://localhost:3000` and
@@ -209,6 +221,17 @@ Exit codes: `0` verified · `1` rejected · `2` insufficient evidence ·
 `3` conflict/investigation · `4` operational · `5` invalid input.
 `audit verify`: 0 valid / 1 tampered / 5 bad input. `doctor`: 0 / 4.
 
+Keyless (Fulcio) governance: copy `fixtures/trust-root.example.json`, then
+
+```bash
+./quorum attest cosign-verify-attestation --artifact FILE --signature BUNDLE \
+  --certificate-identity 'https://github.com/myorg/myrepo' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  --trust-root trust-root.json
+# unlisted identity -> exit 1 (SIGNER_NOT_TRUSTED); add "requireRekor": true
+# + --rekor-entry UUID to mandate transparency inclusion (else exit 4)
+```
+
 ## Backend API (summary)
 
 Base `/api/v1`, JSON, every response carries `requestId`;
@@ -238,10 +261,16 @@ Env: `QUORUM_ADDR` (:8080), `QUORUM_DATABASE_URL`, `QUORUM_BLOB_DIR`
 ## Testing
 
 ```bash
-npm test                                        # deterministic Node suite (21 tests)
+npm test                                        # deterministic Node suite (24 tests)
 go test ./...                                   # full Go suite
 go vet ./... && node scripts/coverage.mjs       # gates: 90% unit scope, 95% criticals
+node scripts/mutate.mjs                         # mutation gate (make mutation)
+node scripts/demo-e2e.mjs                       # full E2E (make demo; API/Anvil phases SKIP when down)
+node scripts/scan.mjs                           # vet + govulncheck + npm audit + secrets (make scan)
+node scripts/sbom.mjs                           # SBOM (make sbom; make sign with cosign)
+go test -fuzz FuzzConflictVisibility -fuzztime 30s ./services/policy/  # (make fuzz)
 make test-contracts                             # forge (skips gracefully if absent)
+make test-web                                   # web typecheck + build + Playwright e2e
 QUORUM_TEST_POSTGRES=1 go test -run TestPostgresIntegration ./apps/api/...
 QUORUM_LIVE_ANVIL=1 go test -run TestAnchorLive ./internal/runner/
 QUORUM_LIVE_COSIGN=1 go test -run TestLive ./services/cosign/
@@ -251,7 +280,7 @@ make test-all                                   # deterministic gate (never live
 ```
 
 Matrices: `docs/testing/TEST-MATRIX.md`, `docs/testing/REQUIREMENT-MATRIX.md`
-(REQ-001…019). Coverage measured 2026-10-04: unit 93.6%, policy 100 /
+(REQ-001…036). Coverage measured 2026-10-04: unit 93.6%, policy 100 /
 cosign 98.6 / sigstore 96.0 / runner 96.0 / server 97.8.
 
 ## Security model (short)
@@ -265,17 +294,15 @@ CORS, 1 MiB caps, timeouts, no secret logging. Builders run Docker-isolated,
 
 ## What's lacking (honest)
 
-- Web is one overview page: no release/builder/policy/audit detail routes,
-  evidence section hard-coded empty, no Playwright suite yet.
 - Same-host Docker builders prove the protocol, not infrastructure
   independence (needs separate clouds/operators/creds/monitoring).
-- Local P-256 signing is protocol proof; prod needs Cosign/Fulcio/Rekor
-  trust-root governance (live adapters exist, env-gated).
 - S3 impl done; bucket policy/retention/backups/creds are deployment work.
 - Anvil demo only; public chain needs key custody, RPC resilience, fee policy.
-- Quorum's own SBOM/signing/scans, quotas beyond caps, k8s manifests, full
-  `make demo` E2E + FINAL-REPORT + mutation/fuzz/chaos: still roadmap
-  (`prompt.md` §§26–33, `CONTEXT.md` "To achieve").
+- Quotas beyond caps, k8s manifests: still roadmap (`prompt.md` §§26–33,
+  `CONTEXT.md` "To achieve").
+- Residual: one `postcss` transitive advisory under Next required an npm
+  `overrides` pin (build-time CSS only, no attacker input); Next kept at
+  latest patched 15.x with `npm audit` at 0 vulnerabilities.
 
 ## Docs index
 
